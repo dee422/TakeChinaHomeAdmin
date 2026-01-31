@@ -1,6 +1,7 @@
 package com.dee.android.pbl.takechinahome.admin.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,11 +15,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dee.android.pbl.takechinahome.admin.ui.components.AuditItemCard
 import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
+import com.dee.android.pbl.takechinahome.admin.viewmodel.FilterMode
 
 // 必须手动导入 getValue 才能使用 'by' 代理
 import androidx.compose.runtime.getValue
@@ -26,14 +29,13 @@ import androidx.compose.runtime.getValue
 data class DashboardStat(
     val label: String,
     val value: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val icon: ImageVector,
     val color: Color
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
-    // 因为 ViewModel 中使用 mutableStateOf，这里直接使用 by 读取即可
     val uiState by viewModel.uiState
     var searchQuery by remember { mutableStateOf("") }
 
@@ -62,7 +64,7 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
         ) {
             // 1. 顶部个人信息区
             item {
-                AdminTopHeader(pendingCount = uiState.pendingItems.size)
+                AdminTopHeader(pendingCount = uiState.allItems.filter { it.status == 1 }.size)
             }
 
             // 2. 系统公告区
@@ -70,17 +72,18 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
                 AnnouncementSection(announcements)
             }
 
-            // 3. 功能导航区
+            // 3. 功能导航区 (传入筛选回调)
             item {
-                FunctionNavigation()
+                FunctionNavigation(
+                    currentMode = uiState.filterMode,
+                    onFilterChange = { mode -> viewModel.setFilterMode(mode) }
+                )
             }
 
-            item { FunctionNavigation() }
-
-            // 插入数据看板
+            // 4. 数据看板
             item { DashboardSection() }
 
-            // 4. 搜索框
+            // 5. 搜索框
             item {
                 OutlinedTextField(
                     value = searchQuery,
@@ -98,17 +101,23 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
                 )
             }
 
-            // 5. 待审核清单标题
+            // 6. 动态清单标题
             item {
+                val title = when (uiState.filterMode) {
+                    FilterMode.ALL -> "全部物什清单"
+                    FilterMode.PENDING -> "待审核物什清单"
+                    FilterMode.APPROVED -> "已发布物什清单"
+                    FilterMode.REJECTED -> "已驳回物什清单"
+                }
                 Text(
-                    text = "待审核物什清单",
+                    text = title,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
             }
 
-            // 6. 审核列表项
+            // 7. 审核列表项
             if (uiState.isLoading) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(50.dp), contentAlignment = Alignment.Center) {
@@ -116,13 +125,27 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
                     }
                 }
             } else {
-                // 修正变量名为 pendingItems，并使用 Boolean 调用 performAction
-                items(uiState.pendingItems.filter { it.itemName.contains(searchQuery, ignoreCase = true) }) { item ->
-                    AuditItemCard(
-                        item = item,
-                        onApprove = { viewModel.performAction(item.id, true) },
-                        onReject = { viewModel.performAction(item.id, false) }
-                    )
+                val filteredList = uiState.pendingItems.filter {
+                    it.itemName.contains(searchQuery, ignoreCase = true)
+                }
+
+                if (filteredList.isEmpty()) {
+                    item {
+                        Text(
+                            "暂无相关记录",
+                            modifier = Modifier.fillMaxWidth().padding(32.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            color = Color.Gray
+                        )
+                    }
+                } else {
+                    items(filteredList) { item ->
+                        AuditItemCard(
+                            item = item,
+                            onApprove = { viewModel.performAction(item.id, true) },
+                            onReject = { viewModel.performAction(item.id, false) }
+                        )
+                    }
                 }
             }
         }
@@ -138,7 +161,7 @@ fun AdminTopHeader(pendingCount: Int) {
     ) {
         Column {
             Text("午安，管理员", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-            Text("目前有 $pendingCount 项待处理申请", color = Color.Gray)
+            Text("目前有 $pendingCount 项申请待处理", color = Color.Gray)
         }
         Box {
             Surface(Modifier.size(48.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
@@ -148,6 +171,69 @@ fun AdminTopHeader(pendingCount: Int) {
                 Badge(Modifier.align(Alignment.TopEnd)) { Text(pendingCount.toString()) }
             }
         }
+    }
+}
+
+@Composable
+fun FunctionNavigation(currentMode: FilterMode, onFilterChange: (FilterMode) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceAround
+    ) {
+        NavigationItem(
+            icon = Icons.Default.CheckCircle,
+            label = "准入审核",
+            color = Color(0xFF4CAF50),
+            isSelected = currentMode == FilterMode.PENDING,
+            onClick = { onFilterChange(FilterMode.PENDING) }
+        )
+        NavigationItem(
+            icon = Icons.AutoMirrored.Filled.List,
+            label = "全部清单",
+            color = Color(0xFF2196F3),
+            isSelected = currentMode == FilterMode.ALL,
+            onClick = { onFilterChange(FilterMode.ALL) }
+        )
+        NavigationItem(
+            icon = Icons.Default.Cancel,
+            label = "已驳回",
+            color = Color(0xFFF44336),
+            isSelected = currentMode == FilterMode.REJECTED,
+            onClick = { onFilterChange(FilterMode.REJECTED) }
+        )
+    }
+}
+
+@Composable
+fun NavigationItem(
+    icon: ImageVector,
+    label: String,
+    color: Color,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable { onClick() }
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = if (isSelected) color else color.copy(alpha = 0.1f),
+            modifier = Modifier.size(56.dp)
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (isSelected) Color.White else color,
+                modifier = Modifier.padding(16.dp)
+            )
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.padding(top = 4.dp)
+        )
     }
 }
 
@@ -170,28 +256,6 @@ fun AnnouncementSection(notices: List<Pair<String, String>>) {
                 }
             }
         }
-    }
-}
-
-@Composable
-fun FunctionNavigation() {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceAround
-    ) {
-        NavigationItem(Icons.Default.CheckCircle, "准入审核", Color(0xFF4CAF50))
-        NavigationItem(Icons.AutoMirrored.Filled.List, "全部清单", Color(0xFF2196F3))
-        NavigationItem(Icons.Default.Settings, "后台设置", Color(0xFF9E9E9E))
-    }
-}
-
-@Composable
-fun NavigationItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Surface(shape = CircleShape, color = color.copy(alpha = 0.1f), modifier = Modifier.size(56.dp)) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.padding(16.dp))
-        }
-        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
