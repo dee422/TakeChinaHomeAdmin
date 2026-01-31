@@ -23,6 +23,13 @@ import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
 // 必须手动导入 getValue 才能使用 'by' 代理
 import androidx.compose.runtime.getValue
 
+data class DashboardStat(
+    val label: String,
+    val value: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val color: Color
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
@@ -67,6 +74,11 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
             item {
                 FunctionNavigation()
             }
+
+            item { FunctionNavigation() }
+
+            // 插入数据看板
+            item { DashboardSection() }
 
             // 4. 搜索框
             item {
@@ -180,5 +192,51 @@ fun NavigationItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label:
             Icon(icon, contentDescription = null, tint = color, modifier = Modifier.padding(16.dp))
         }
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+fun DashboardSection() {
+    val stats = listOf(
+        DashboardStat("总置换", "1,284", Icons.Default.SwapHoriz, Color(0xFF673AB7)),
+        DashboardStat("活跃用户", "456", Icons.Default.People, Color(0xFF009688)),
+        DashboardStat("本周新增", "+12", Icons.Default.TrendingUp, Color(0xFFFF5722))
+    )
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        Text(
+            text = "数据概览",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            stats.forEach { stat ->
+                StatCard(stat, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+fun StatCard(stat: DashboardStat, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Icon(stat.icon, contentDescription = null, tint = stat.color, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = stat.value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(text = stat.label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        }
     }
 }
