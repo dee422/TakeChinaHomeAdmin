@@ -23,17 +23,6 @@ import com.dee.android.pbl.takechinahome.admin.ui.components.AuditItemCard
 import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
 import com.dee.android.pbl.takechinahome.admin.viewmodel.FilterMode
 
-// 必须手动导入 getValue 才能使用 'by' 代理
-import androidx.compose.runtime.getValue
-
-data class DashboardStat(
-    val label: String,
-    val value: String,
-    val icon: ImageVector,
-    val color: Color
-)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
     val uiState by viewModel.uiState
@@ -44,35 +33,23 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
         "系统服务器定于今晚进行例行维护" to "昨天"
     )
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("管理后台", fontWeight = FontWeight.Bold) },
-                actions = {
-                    IconButton(onClick = { viewModel.fetchPendingItems() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新")
-                    }
-                }
-            )
-        }
-    ) { padding ->
+    // ✨ 核心修正：移除 Scaffold 和 TopAppBar，直接从内容开始
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+    ) {
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            modifier = Modifier.fillMaxSize()
         ) {
-            // 1. 顶部个人信息区
-            item {
-                AdminTopHeader(pendingCount = uiState.allItems.filter { it.status == 1 }.size)
-            }
+            // ✨ 修正：移除了 AdminTopHeader (那块带欢迎语和重复头像的区域)
 
-            // 2. 系统公告区
+            // 1. 系统公告区
             item {
                 AnnouncementSection(announcements)
             }
 
-            // 3. 功能导航区 (传入筛选回调)
+            // 2. 功能导航区 (准入审核/全部清单/已驳回)
             item {
                 FunctionNavigation(
                     currentMode = uiState.filterMode,
@@ -80,10 +57,10 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
                 )
             }
 
-            // 4. 数据看板
+            // 3. 数据看板 (数据概览卡片)
             item { DashboardSection() }
 
-            // 5. 搜索框
+            // 4. 搜索框
             item {
                 OutlinedTextField(
                     value = searchQuery,
@@ -101,7 +78,7 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
                 )
             }
 
-            // 6. 动态清单标题
+            // 5. 动态清单标题
             item {
                 val title = when (uiState.filterMode) {
                     FilterMode.ALL -> "全部物什清单"
@@ -117,7 +94,7 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
                 )
             }
 
-            // 7. 审核列表项
+            // 6. 审核列表项
             if (uiState.isLoading) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(50.dp), contentAlignment = Alignment.Center) {
@@ -152,27 +129,7 @@ fun AuditDashboardScreen(viewModel: AuditViewModel = viewModel()) {
     }
 }
 
-@Composable
-fun AdminTopHeader(pendingCount: Int) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column {
-            Text("午安，管理员", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
-            Text("目前有 $pendingCount 项申请待处理", color = Color.Gray)
-        }
-        Box {
-            Surface(Modifier.size(48.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.padding(8.dp))
-            }
-            if (pendingCount > 0) {
-                Badge(Modifier.align(Alignment.TopEnd)) { Text(pendingCount.toString()) }
-            }
-        }
-    }
-}
+// ✨ 这里的 AdminTopHeader 已弃用，MainActivity 接管了头像显示
 
 @Composable
 fun FunctionNavigation(currentMode: FilterMode, onFilterChange: (FilterMode) -> Unit) {
@@ -245,7 +202,7 @@ fun AnnouncementSection(notices: List<Pair<String, String>>) {
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFFBC02D))
+                Icon(Icons.Default.Campaign, contentDescription = null, tint = Color(0xFFFBC02D))
                 Spacer(Modifier.width(8.dp))
                 Text("系统公告", fontWeight = FontWeight.Bold)
             }
@@ -297,10 +254,17 @@ fun StatCard(stat: DashboardStat, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.Start
         ) {
-            Icon(stat.icon, contentDescription = null, tint = stat.color, modifier = Modifier.size(20.dp))
+            Icon(stat.icon, tint = stat.color, modifier = Modifier.size(20.dp), contentDescription = null)
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = stat.value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             Text(text = stat.label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
         }
     }
 }
+
+data class DashboardStat(
+    val label: String,
+    val value: String,
+    val icon: ImageVector,
+    val color: Color
+)
