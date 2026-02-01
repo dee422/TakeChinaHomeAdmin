@@ -68,7 +68,7 @@ fun AdminMainContainer() {
                     "置换审核" to Icons.Default.CheckCircle,
                     "产品管理" to Icons.Default.List,
                     "礼品发布" to Icons.Default.CardGiftcard,
-                    "客户会话" to Icons.Default.Chat,
+                    "订单管理" to Icons.Default.Chat,
                     "用户管理" to Icons.Default.People,
                     "数据看板" to Icons.Default.Assessment
                 )
