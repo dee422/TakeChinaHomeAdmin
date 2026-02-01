@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dee.android.pbl.takechinahome.admin.ui.screens.AuditDashboardScreen
+import com.dee.android.pbl.takechinahome.admin.ui.screens.ProductUploadScreen
 import com.dee.android.pbl.takechinahome.admin.ui.theme.TakeChinaHomeAdminTheme
 import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
 import kotlinx.coroutines.launch
@@ -141,7 +142,7 @@ fun AdminMainContainer() {
             ) {
                 when (currentScreen) {
                     "置换审核" -> AuditDashboardScreen(viewModel = auditViewModel)
-                    "产品上架" -> ProductUploadPlaceholder()
+                    "产品上架" -> ProductUploadScreen()
                     else -> PlaceholderScreen(currentScreen)
                 }
             }
