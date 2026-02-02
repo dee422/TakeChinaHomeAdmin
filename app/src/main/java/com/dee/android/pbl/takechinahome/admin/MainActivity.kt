@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dee.android.pbl.takechinahome.admin.ui.screens.AuditDashboardScreen
+import com.dee.android.pbl.takechinahome.admin.ui.screens.GiftDevScreen
 import com.dee.android.pbl.takechinahome.admin.ui.screens.ProductListScreen
 import com.dee.android.pbl.takechinahome.admin.ui.screens.ProductUploadScreen
 import com.dee.android.pbl.takechinahome.admin.ui.theme.TakeChinaHomeAdminTheme
@@ -161,6 +162,7 @@ fun AdminMainContainer() {
                     "产品上架" -> ProductUploadScreen()
                     // ✨ 传入 refreshSignal
                     "产品管理" -> ProductListScreen(refreshSignal = refreshSignal)
+                    "礼品发布" -> GiftDevScreen(auditViewModel = auditViewModel)
                     else -> PlaceholderScreen(currentScreen)
                 }
             }
