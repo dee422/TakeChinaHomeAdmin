@@ -104,36 +104,61 @@ fun ProductUploadScreen() {
         }
     }
 
+    // 相册选择启动器：允许选择所有 image/* 类型的文件
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        // 将选中的多张图片添加到列表
+        capturedImageUris.addAll(uris)
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("录入新产品", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
 
         LazyRow(modifier = Modifier.fillMaxWidth().height(160.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
+                // 定义一个显示弹窗的状态
+                var showImageSourceDialog by remember { mutableStateOf(false) }
+
+                // 在原有的“+”号 Surface 点击处修改逻辑
                 Surface(
                     modifier = Modifier.size(160.dp).clip(RoundedCornerShape(12.dp)),
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    onClick = {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                            val file = File(context.externalCacheDir, "gift_${System.currentTimeMillis()}.jpg")
-                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                            currentPhotoUri = uri
-                            cameraLauncher.launch(uri)
-                        } else {
-                            permissionLauncher.launch(Manifest.permission.CAMERA)
-                        }
-                    }
+                    onClick = { showImageSourceDialog = true } // 点击弹出选择框
                 ) {
-                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.AddAPhoto, null) }
-                }
-            }
-            itemsIndexed(capturedImageUris) { index, uri ->
-                Box(modifier = Modifier.size(160.dp)) {
-                    val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-                    bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop) }
-                    IconButton(onClick = { capturedImageUris.removeAt(index) }, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(24.dp).background(Color.Black.copy(0.5f), CircleShape)) {
-                        Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.AddAPhoto, "添加图片")
                     }
+                }
+
+                // 简单的选择弹窗
+                if (showImageSourceDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showImageSourceDialog = false },
+                        title = { Text("选择图片来源") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showImageSourceDialog = false
+                                // 检查拍照权限逻辑（沿用你昨天的逻辑）
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+                                    == PackageManager.PERMISSION_GRANTED) {
+                                    val file = File(context.externalCacheDir, "gift_${System.currentTimeMillis()}.jpg")
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                                    currentPhotoUri = uri
+                                    cameraLauncher.launch(uri)
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            }) { Text("现在拍照") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                showImageSourceDialog = false
+                                galleryLauncher.launch("image/*") // 打开相册
+                            }) { Text("从相册选择") }
+                        }
+                    )
                 }
             }
         }
