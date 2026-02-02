@@ -1,6 +1,7 @@
 package com.dee.android.pbl.takechinahome.admin
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -12,10 +13,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dee.android.pbl.takechinahome.admin.ui.screens.AuditDashboardScreen
+import com.dee.android.pbl.takechinahome.admin.ui.screens.ProductListScreen
 import com.dee.android.pbl.takechinahome.admin.ui.screens.ProductUploadScreen
 import com.dee.android.pbl.takechinahome.admin.ui.theme.TakeChinaHomeAdminTheme
 import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
@@ -35,9 +38,11 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminMainContainer() {
+    val context = LocalContext.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var currentScreen by remember { mutableStateOf("置换审核") }
+    var refreshSignal by remember { mutableLongStateOf(0L) }
 
     // 获取 ViewModel
     val auditViewModel: AuditViewModel = viewModel()
@@ -88,6 +93,7 @@ fun AdminMainContainer() {
             }
         }
     ) {
+
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
@@ -98,8 +104,19 @@ fun AdminMainContainer() {
                         }
                     },
                     actions = {
-                        // 1. 刷新按钮：联动 ViewModel 的 fetch 函数
-                        IconButton(onClick = { auditViewModel.fetchPendingItems() }) {
+                        // 1. 刷新按钮：多页面联动逻辑
+                        IconButton(onClick = {
+                            when (currentScreen) {
+                                "置换审核" -> auditViewModel.fetchPendingItems()
+                                "产品管理" -> {
+                                    // ✨ 核心：改变时间戳信号，触发 ProductListScreen 刷新
+                                    refreshSignal = System.currentTimeMillis()
+                                }
+                                else -> {
+                                    Toast.makeText(context, "$currentScreen 暂不支持刷新", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) {
                             Icon(Icons.Default.Refresh, contentDescription = "刷新")
                         }
 
@@ -109,7 +126,6 @@ fun AdminMainContainer() {
                         }
 
                         // 3. 用户头像 + 动态 Badge
-                        // ✨ 修正：增加 end padding (12.dp) 确保红点显示完整
                         Box(modifier = Modifier.padding(end = 12.dp)) {
                             BadgedBox(
                                 badge = {
@@ -133,7 +149,7 @@ fun AdminMainContainer() {
                 )
             }
         ) { innerPadding ->
-            // ✨ 修正：直接进入主内容，彻底干掉阴影区提到的冗余 Header
+            // 内容分发区
             Surface(
                 modifier = Modifier
                     .fillMaxSize()
@@ -143,6 +159,8 @@ fun AdminMainContainer() {
                 when (currentScreen) {
                     "置换审核" -> AuditDashboardScreen(viewModel = auditViewModel)
                     "产品上架" -> ProductUploadScreen()
+                    // ✨ 传入 refreshSignal
+                    "产品管理" -> ProductListScreen(refreshSignal = refreshSignal)
                     else -> PlaceholderScreen(currentScreen)
                 }
             }
