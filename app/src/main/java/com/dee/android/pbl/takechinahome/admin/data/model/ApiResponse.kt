@@ -9,5 +9,6 @@ package com.dee.android.pbl.takechinahome.admin.data.model
 data class ApiResponse<T>(
     val success: Boolean,
     val message: String? = null,
+    val refined_text: String? = null, // ✨ 添加这个字段，或者让 T 包含它
     val data: T? = null
 )

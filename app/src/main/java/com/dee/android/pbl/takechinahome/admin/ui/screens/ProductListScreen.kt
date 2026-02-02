@@ -1,13 +1,17 @@
 package com.dee.android.pbl.takechinahome.admin.ui.screens
 
+import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -17,21 +21,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.dee.android.pbl.takechinahome.admin.data.network.RetrofitClient
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.graphicsLayer
 
-// 数据模型
+// --- 数据模型 ---
 data class AdminGift(
     val id: Int,
     val name: String,
@@ -39,6 +44,15 @@ data class AdminGift(
     val desc: String,
     val deadline: String,
     val images: List<String>
+)
+
+data class AiEngine(val id: String, val name: String, val isOverseas: Boolean)
+
+val aiEngines = listOf(
+    AiEngine("zhipu", "智谱 GLM-4", false),
+    AiEngine("deepseek", "DeepSeek-V3", false),
+    AiEngine("gemini", "Gemini 1.5", true),
+    AiEngine("qwen", "通义千问", false)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,45 +63,25 @@ fun ProductListScreen(refreshSignal: Long = 0L) {
     var productList by remember { mutableStateOf<List<AdminGift>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
-    // 封装刷新函数
     val loadData = {
         scope.launch {
             isLoading = true
             try {
                 productList = RetrofitClient.adminService.getGifts()
             } catch (e: Exception) {
-                Toast.makeText(context, "同步失败", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "加载失败", Toast.LENGTH_SHORT).show()
             } finally {
                 isLoading = false
             }
         }
     }
 
-    // ✨ 核心修正：监听 refreshSignal 的变化
-    // 每次点击 MainActivity 的刷新按钮，refreshSignal 改变，这里就会执行
-    LaunchedEffect(refreshSignal) {
-        loadData()
-    }
+    LaunchedEffect(refreshSignal) { loadData() }
+    LaunchedEffect(Unit) { loadData() }
 
     var selectedProduct by remember { mutableStateOf<AdminGift?>(null) }
     var showEditDialog by remember { mutableStateOf(false) }
     var productToDelete by remember { mutableStateOf<AdminGift?>(null) }
-
-    // 刷新函数
-    val refreshData = {
-        scope.launch {
-            isLoading = true
-            try {
-                productList = RetrofitClient.adminService.getGifts()
-            } catch (e: Exception) {
-                Toast.makeText(context, "加载失败: ${e.message}", Toast.LENGTH_SHORT).show()
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) { refreshData() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (isLoading) {
@@ -110,19 +104,12 @@ fun ProductListScreen(refreshSignal: Long = 0L) {
             }
         }
 
-        // --- 1. 删除确认弹窗 ---
         if (productToDelete != null) {
             AlertDialog(
                 onDismissRequest = { productToDelete = null },
-                icon = { // 确保 imageVector 是第一个参数，或者使用命名参数
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "待精修",
-                        tint = Color.Red,
-                        modifier = Modifier.size(14.dp)
-                    ) },
-                title = { Text("确认下架该卷宗？") },
-                text = { Text("产品 [${productToDelete?.name}] 将被永久从库中抹除，不可撤回。") },
+                icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red) },
+                title = { Text("确认移除？") },
+                text = { Text("将删除 [${productToDelete?.name}]。") },
                 confirmButton = {
                     Button(
                         onClick = {
@@ -130,24 +117,23 @@ fun ProductListScreen(refreshSignal: Long = 0L) {
                                 try {
                                     val response = RetrofitClient.adminService.deleteGift(productToDelete!!.id)
                                     if (response.success) {
-                                        Toast.makeText(context, "已成功移除", Toast.LENGTH_SHORT).show()
-                                        refreshData()
+                                        Toast.makeText(context, "已删除", Toast.LENGTH_SHORT).show()
+                                        loadData()
                                     }
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "操作失败", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "删除失败", Toast.LENGTH_SHORT).show()
                                 }
                                 productToDelete = null
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                    ) { Text("确定移除", color = Color.White) }
+                    ) { Text("确定", color = Color.White) }
                 },
-                dismissButton = { TextButton(onClick = { productToDelete = null }) { Text("留存") } }
+                dismissButton = { TextButton(onClick = { productToDelete = null }) { Text("取消") } }
             )
         }
     }
 
-    // --- 2. 编辑弹窗 (集成图片展示 & AI 预留) ---
     if (showEditDialog && selectedProduct != null) {
         EditProductDialog(
             product = selectedProduct!!,
@@ -162,7 +148,7 @@ fun ProductListScreen(refreshSignal: Long = 0L) {
                         if (response.success) {
                             Toast.makeText(context, "更新成功", Toast.LENGTH_SHORT).show()
                             showEditDialog = false
-                            refreshData()
+                            loadData()
                         }
                     } catch (e: Exception) {
                         Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
@@ -180,134 +166,236 @@ fun EditProductDialog(
     onDismiss: () -> Unit,
     onSave: (AdminGift) -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("ai_settings", Context.MODE_PRIVATE) }
+    val scope = rememberCoroutineScope()
+
     var name by remember { mutableStateOf(product.name) }
     var deadline by remember { mutableStateOf(product.deadline) }
     var spec by remember { mutableStateOf(product.spec) }
     var desc by remember { mutableStateOf(product.desc) }
+
+    var currentEngine by remember { mutableStateOf(aiEngines[0]) }
+    var showEngineSettings by remember { mutableStateOf(false) }
+    var apiKeyMap by remember {
+        mutableStateOf(aiEngines.associate { it.id to (prefs.getString("key_${it.id}", "") ?: "") })
+    }
+
     var isAiRefining by remember { mutableStateOf(false) }
     var zoomImageUrl by remember { mutableStateOf<String?>(null) }
 
-    val scope = rememberCoroutineScope()
+    // --- 样本管理逻辑 ---
+    val defaultSamples = listOf(
+        "通用" to "釉色温润，包浆自然，器型规整，尽显古朴大方之气。",
+        "青瓷" to "釉面滋润如玉，青中泛翠，色泽清冽。其开片纹理自然，犹如冰裂错落有致。",
+        "紫砂" to "泥质纯正，砂粒隐现。壶身线条饱满，口盖严丝合缝，出水顺畅如柱。",
+        "禅茶" to "意境深远，器物与空间相映成趣。无冗余修饰，唯余质朴本真，屏息凝神。"
+    )
 
+    var sampleList by remember { mutableStateOf(defaultSamples) }
+    var selectedSampleIndex by remember { mutableIntStateOf(0) }
+    var showSampleManager by remember { mutableStateOf(false) }
+    var sampleText by remember { mutableStateOf(sampleList[0].second) }
+
+    // 用于新增样本的临时状态
+    var showAddSampleDialog by remember { mutableStateOf(false) }
+    var newSampleTitle by remember { mutableStateOf("") }
+    var newSampleContent by remember { mutableStateOf("") }
+
+    // --- 1. 样本管理列表弹窗 ---
+    if (showSampleManager) {
+        AlertDialog(
+            onDismissRequest = { showSampleManager = false },
+            title = { Text("选择学习样本库") },
+            text = {
+                Column(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                    sampleList.forEachIndexed { index, pair ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { selectedSampleIndex = index }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = (selectedSampleIndex == index), onClick = { selectedSampleIndex = index })
+                            Column(modifier = Modifier.padding(start = 8.dp)) {
+                                Text(pair.first, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(pair.second, maxLines = 1, fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    TextButton(onClick = { showAddSampleDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("添加自定义类别样本")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    sampleText = sampleList[selectedSampleIndex].second
+                    showSampleManager = false
+                    Toast.makeText(context, "已切换至：${sampleList[selectedSampleIndex].first}", Toast.LENGTH_SHORT).show()
+                }) { Text("使用此风格") }
+            },
+            dismissButton = { TextButton(onClick = { showSampleManager = false }) { Text("取消") } }
+        )
+    }
+
+    // --- 2. 添加新样本的输入弹窗 ---
+    if (showAddSampleDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddSampleDialog = false },
+            title = { Text("新增风格样本") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = newSampleTitle, onValueChange = { newSampleTitle = it }, label = { Text("风格名称 (如: 木作)") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = newSampleContent, onValueChange = { newSampleContent = it }, label = { Text("文案范例") }, modifier = Modifier.fillMaxWidth().height(120.dp))
+                }
+            },
+            confirmButton = {
+                Button(enabled = newSampleTitle.isNotBlank() && newSampleContent.isNotBlank(), onClick = {
+                    sampleList = sampleList + (newSampleTitle to newSampleContent)
+                    newSampleTitle = ""
+                    newSampleContent = ""
+                    showAddSampleDialog = false
+                }) { Text("确认添加") }
+            },
+            dismissButton = { TextButton(onClick = { showAddSampleDialog = false }) { Text("取消") } }
+        )
+    }
+
+    // --- 主编辑对话框 ---
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("精修卷宗", fontSize = 18.sp)
-                // ✨ 晚上我们要在这里接入 API 设置按键
-                IconButton(onClick = { /* TODO: 打开 API 设置弹窗 */ }) {
-                    Icon(Icons.Default.SettingsSuggest, contentDescription = "API设置", tint = Color.Gray)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("编辑卷宗", fontSize = 18.sp)
+                IconButton(onClick = { showEngineSettings = true }) {
+                    Icon(Icons.Default.SettingsSuggest, contentDescription = "设置", tint = MaterialTheme.colorScheme.primary)
                 }
             }
         },
         text = {
-            Column(
-                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("原件影像 (点击放大)", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(product.images) { url ->
                         AsyncImage(
-                            model = url,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(100.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.LightGray)
-                                .clickable { zoomImageUrl = url },
+                            model = url, contentDescription = null,
+                            modifier = Modifier.size(100.dp).clip(RoundedCornerShape(8.dp)).background(Color.LightGray).clickable { zoomImageUrl = url },
                             contentScale = ContentScale.Crop
                         )
                     }
                 }
 
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名称") })
-                OutlinedTextField(value = deadline, onValueChange = { deadline = it }, label = { Text("截止日期") })
-                OutlinedTextField(value = spec, onValueChange = { spec = it }, label = { Text("规格") })
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名称") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = deadline, onValueChange = { deadline = it }, label = { Text("日期") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = spec, onValueChange = { spec = it }, label = { Text("规格") }, modifier = Modifier.fillMaxWidth())
 
-                Box {
-                    OutlinedTextField(
-                        value = desc,
-                        onValueChange = { desc = it },
-                        label = { Text("描述") },
-                        modifier = Modifier.fillMaxWidth().height(140.dp)
-                    )
-                    FilledIconButton(
-                        onClick = { /* 晚上接入 AI 逻辑 */ },
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(32.dp),
-                        enabled = !isAiRefining && desc.isNotEmpty()
-                    ) {
-                        if (isAiRefining) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                Column {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("描述 ", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("风格: ${sampleList[selectedSampleIndex].first}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Box {
+                        OutlinedTextField(
+                            value = desc, onValueChange = { desc = it },
+                            modifier = Modifier.fillMaxWidth().height(160.dp)
+                        )
+                        // 操作按钮组
+                        Column(modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // ✨ 点击这里打开样本管理器
+                            SmallFloatingActionButton(
+                                onClick = { showSampleManager = true },
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = CircleShape
+                            ) {
+                                Icon(Icons.Default.LibraryBooks, "选择样本", modifier = Modifier.size(18.dp))
+                            }
+                            SmallFloatingActionButton(
+                                onClick = {
+                                    val userKey = apiKeyMap[currentEngine.id]
+                                    if (userKey.isNullOrBlank()) {
+                                        Toast.makeText(context, "请先设置 Key", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        scope.launch {
+                                            isAiRefining = true
+                                            try {
+                                                val response = RetrofitClient.adminService.refineText(currentEngine.id, userKey, desc, sampleText)
+                                                desc = response.refined_text ?: desc
+                                                Toast.makeText(context, "润色成功", Toast.LENGTH_SHORT).show()
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
+                                            } finally { isAiRefining = false }
+                                        }
+                                    }
+                                },
+                                containerColor = MaterialTheme.colorScheme.primary, shape = CircleShape
+                            ) {
+                                if (isAiRefining) CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                else Icon(Icons.Default.AutoAwesome, "生成", modifier = Modifier.size(18.dp), tint = Color.White)
+                            }
                         }
                     }
                 }
             }
         },
-        confirmButton = {
-            Button(onClick = { onSave(product.copy(name = name, deadline = deadline, spec = spec, desc = desc)) }) {
-                Text("存入库房")
-            }
-        },
+        confirmButton = { Button(onClick = { onSave(product.copy(name = name, deadline = deadline, spec = spec, desc = desc)) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 
-    // ✨ 大图预览层（含手势缩放）
+    // --- API 设置弹窗 ---
+    if (showEngineSettings) {
+        AlertDialog(
+            onDismissRequest = { showEngineSettings = false },
+            title = { Text("API 密钥配置") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    aiEngines.forEach { engine ->
+                        val isSelected = currentEngine == engine
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { currentEngine = engine },
+                            colors = CardDefaults.cardColors(containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent),
+                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(selected = isSelected, onClick = { currentEngine = engine })
+                                    Text(engine.name, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedTextField(
+                                    value = apiKeyMap[engine.id] ?: "",
+                                    onValueChange = { newKey ->
+                                        apiKeyMap = apiKeyMap.toMutableMap().apply { put(engine.id, newKey) }
+                                        prefs.edit().putString("key_${engine.id}", newKey).apply()
+                                    },
+                                    label = { Text("API Key") },
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { Button(onClick = { showEngineSettings = false }) { Text("完成") } }
+        )
+    }
+
+    // --- 缩放层 ---
     if (zoomImageUrl != null) {
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { zoomImageUrl = null }
-        ) {
-            // 用于存储缩放和平移状态
+        androidx.compose.ui.window.Dialog(onDismissRequest = { zoomImageUrl = null }) {
             var scale by remember { mutableStateOf(1f) }
             var offset by remember { mutableStateOf(Offset.Zero) }
-
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black)
-                    .pointerInput(Unit) {
-                        // 监听手势
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1f, 5f) // 限制缩放倍数 1x-5x
-                            offset += pan
-                        }
-                    },
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)).background(Color.Black)
+                    .pointerInput(Unit) { detectTransformGestures { _, pan, zoom, _ -> scale = (scale * zoom).coerceIn(1f, 5f); offset += pan } },
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
-                    model = zoomImageUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp)
-                        // 应用缩放和平移变换
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offset.x,
-                            translationY = offset.y
-                        ),
+                    model = zoomImageUrl, contentDescription = null,
+                    modifier = Modifier.fillMaxSize().padding(8.dp).graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
                     contentScale = ContentScale.Fit
                 )
-
-                // 顶部操作提示
-                Row(
-                    modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("双指缩放", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
-                    IconButton(onClick = { zoomImageUrl = null }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White)
-                    }
-                }
             }
         }
     }
@@ -315,32 +403,12 @@ fun EditProductDialog(
 
 @Composable
 fun ProductItemRow(product: AdminGift, onEdit: () -> Unit, onDelete: () -> Unit) {
-    val isIncomplete = product.spec.isEmpty() || product.desc.isEmpty()
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(text = product.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            if (isIncomplete) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Red, modifier = Modifier.size(14.dp))
-                    Text(" 待精修", color = Color.Red, style = MaterialTheme.typography.labelSmall)
-                }
-            } else {
-                Text(text = "规格: ${product.spec}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-            }
+            Text(text = "规格: ${product.spec}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
-
-        // 操作区
-        IconButton(onClick = onEdit) {
-            Icon(Icons.Default.Edit, contentDescription = "编辑", tint = MaterialTheme.colorScheme.primary)
-        }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Default.Delete, contentDescription = "删除", tint = Color.Gray)
-        }
+        IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+        IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Gray) }
     }
 }

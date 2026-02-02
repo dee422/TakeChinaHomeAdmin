@@ -74,4 +74,13 @@ interface AdminApiService {
     suspend fun deleteGift(
         @Field("id") id: Int
     ): ApiResponse<Unit>
+
+    @FormUrlEncoded
+    @POST("ai_proxy.php")
+    suspend fun refineText(
+        @Field("provider") provider: String,
+        @Field("api_key") apiKey: String,
+        @Field("text") text: String,
+        @Field("samples") samples: String
+    ): ApiResponse<String> // 假设返回格式为 {"success":true, "refined_text":"..."}
 }
