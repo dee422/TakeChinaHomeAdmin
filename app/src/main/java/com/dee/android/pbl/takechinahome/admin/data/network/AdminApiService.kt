@@ -1,50 +1,34 @@
 package com.dee.android.pbl.takechinahome.admin.data.network
 
-import com.dee.android.pbl.takechinahome.admin.data.model.AdminUserInfo
-import com.dee.android.pbl.takechinahome.admin.data.model.ApiResponse
-import com.dee.android.pbl.takechinahome.admin.data.model.ExchangeGift
+import com.dee.android.pbl.takechinahome.admin.data.model.*
 import com.dee.android.pbl.takechinahome.admin.ui.screens.AdminGift
-import com.dee.android.pbl.takechinahome.admin.data.model.AdminUser
-import retrofit2.http.Field
-import retrofit2.http.FormUrlEncoded
-import retrofit2.http.GET
-import retrofit2.http.POST
+import com.google.gson.annotations.SerializedName
+import retrofit2.http.*
 
-// --- 1. AI 辅助功能相关模型 ---
-
+// --- AI 相关响应模型 ---
+// 增加注解确保字段映射准确，同时符合 Kotlin 命名规范
 data class AiRefineResult(
     val success: Boolean,
-    val refined_text: String?,
+    @SerializedName("refined_text") val refinedText: String?,
     val message: String?
 )
 
 data class ImageResponse(
     val success: Boolean,
-    val image_url: String?,
+    @SerializedName("image_url") val imageUrl: String?,
     val message: String?
 )
 
 data class TextResponse(
     val success: Boolean,
-    val refined_text: String?,
+    @SerializedName("refined_text") val refinedText: String?,
     val message: String?
 )
 
-// --- 2. 用户管理相关模型 ---
-
-data class AdminUser(
-    val email: String,
-    val name: String,
-    val role: String, // "admin" 或 "user"
-    val createdAt: String
-)
-
-// --- 3. 核心 API 接口 ---
-
+// --- 核心 API 接口 ---
 interface AdminApiService {
 
     // --- A. 市场审核相关 ---
-
     @GET("get_pending_items.php")
     suspend fun getPendingItems(): ApiResponse<List<ExchangeGift>>
 
@@ -54,13 +38,11 @@ interface AdminApiService {
         @Field("id") id: Int,
         @Field("status") newStatus: Int,
         @Field("admin_token") token: String = "secret_admin_key"
-    ): ApiResponse<Unit>
-
+    ): ApiResponse<Any?>
 
     // --- B. 产品上架与库管理相关 ---
-
     @GET("get_gifts.php")
-    suspend fun getGifts(): List<AdminGift>
+    suspend fun getGifts(): ApiResponse<List<AdminGift>>
 
     @FormUrlEncoded
     @POST("upload_gifts.php")
@@ -70,7 +52,7 @@ interface AdminApiService {
         @Field("spec") spec: String,
         @Field("desc") desc: String,
         @Field("image_list") imageListJson: String
-    ): ApiResponse<Unit>
+    ): ApiResponse<Any?>
 
     @FormUrlEncoded
     @POST("update_gift.php")
@@ -80,17 +62,13 @@ interface AdminApiService {
         @Field("deadline") deadline: String,
         @Field("spec") spec: String,
         @Field("desc") desc: String
-    ): ApiResponse<Unit>
+    ): ApiResponse<Any?>
 
     @FormUrlEncoded
     @POST("delete_gift_admin.php")
-    suspend fun deleteGift(
-        @Field("id") id: Int
-    ): ApiResponse<Unit>
+    suspend fun deleteGift(@Field("id") id: Int): ApiResponse<Any?>
 
-
-    // --- C. AI 辅助功能 (文本与图像) ---
-
+    // --- C. AI 辅助功能 ---
     @FormUrlEncoded
     @POST("ai_proxy.php")
     suspend fun refineText(
@@ -119,10 +97,6 @@ interface AdminApiService {
     ): TextResponse
 
     // --- D. 账户权限与用户管理 ---
-
-    /**
-     * 登录接口：验证身份并获取 role
-     */
     @FormUrlEncoded
     @POST("admin_login.php")
     suspend fun login(
@@ -130,22 +104,30 @@ interface AdminApiService {
         @Field("password") password: String
     ): ApiResponse<AdminUserInfo>
 
-    /**
-     * 创建后台用户：由管理员操作
-     */
     @FormUrlEncoded
     @POST("create_admin_user.php")
     suspend fun createAdminUser(
         @Field("email") email: String,
         @Field("password") password: String,
         @Field("name") name: String,
-        @Field("role") role: String, // "admin" 或 "user"
+        @Field("role") role: String,
         @Field("admin_token") adminToken: String = "secret_admin_key"
-    ): ApiResponse<Unit>
+    ): ApiResponse<Any?>
 
-    /**
-     * 获取所有后台用户列表
-     */
     @GET("get_admin_users.php")
     suspend fun getAdminUsers(): ApiResponse<List<AdminUser>>
+
+    // --- E. 订单管理 ---
+    @GET("get_intent_orders.php")
+    suspend fun getIntentOrders(
+        @Query("manager_id") managerId: Int
+    ): ApiResponse<List<Order>>
+
+    @FormUrlEncoded
+    @POST("update_order_status.php")
+    suspend fun updateOrderStatus(
+        @Field("order_id") orderId: Int,
+        @Field("status") status: String,
+        @Field("is_intent") isIntent: Int
+    ): ApiResponse<Any?>
 }

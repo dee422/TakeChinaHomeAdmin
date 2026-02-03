@@ -67,7 +67,14 @@ fun ProductListScreen(refreshSignal: Long = 0L) {
         scope.launch {
             isLoading = true
             try {
-                productList = RetrofitClient.adminService.getGifts()
+                // 1. 获取包装后的响应
+                val response = RetrofitClient.adminService.getGifts()
+                // 2. 只有成功且 data 不为空时才赋值
+                if (response.success) {
+                    productList = response.data ?: emptyList()
+                } else {
+                    Toast.makeText(context, response.message ?: "加载失败", Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Exception) {
                 Toast.makeText(context, "加载失败", Toast.LENGTH_SHORT).show()
             } finally {
@@ -321,7 +328,7 @@ fun EditProductDialog(
                                             isAiRefining = true
                                             try {
                                                 val response = RetrofitClient.adminService.refineText(currentEngine.id, userKey, desc, sampleText)
-                                                desc = response.refined_text ?: desc
+                                                desc = response.refinedText ?: desc
                                                 Toast.makeText(context, "润色成功", Toast.LENGTH_SHORT).show()
                                             } catch (e: Exception) {
                                                 Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()

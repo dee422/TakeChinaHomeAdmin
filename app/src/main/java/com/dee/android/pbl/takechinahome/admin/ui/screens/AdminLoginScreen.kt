@@ -1,6 +1,7 @@
 package com.dee.android.pbl.takechinahome.admin.ui.screens
 
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -71,27 +72,45 @@ fun AdminLoginScreen(onLoginSuccess: (AdminUserInfo) -> Unit) {
 
         Button(
             onClick = {
-                if (email.isBlank() || password.isBlank()) return@Button
+                if (email.isBlank() || password.isBlank()) {
+                    Toast.makeText(context, "请完整输入", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
                 scope.launch {
                     isLoggingIn = true
                     try {
                         val response = RetrofitClient.adminService.login(email, password)
+
+                        // ✨ 调试日志：看看后端到底吐出来什么 ID
+                        Log.d("LOGIN_RAW", "Success: ${response.success}, User: ${response.data}")
+
                         if (response.success && response.data != null) {
                             val user = response.data
-                            // 保存登录状态
+
+                            // ❗ 重点检查：如果 user.id 是 0，说明解析失败
+                            if (user.id == 0) {
+                                Log.e("LOGIN_ERROR", "警告：解析到的 ID 为 0，请检查后端返回的字段名是否为 'id'")
+                            }
+
+                            // 1. 持久化存储
                             prefs.edit().apply {
+                                putInt("user_id", user.id) // ✨ 必须存入 ID
                                 putString("user_email", user.email)
                                 putString("user_name", user.name)
                                 putString("user_role", user.role.name)
                                 putBoolean("is_logged_in", true)
                                 apply()
                             }
+
+                            // 2. 回调给 MainActivity 更新内存状态
                             onLoginSuccess(user)
+
                         } else {
-                            Toast.makeText(context, response.message ?: "登录失败", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, response.message ?: "账号或密码错误", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {
-                        Toast.makeText(context, "网络错误", Toast.LENGTH_SHORT).show()
+                        Log.e("LOGIN_ERROR", "登录请求崩了: ${e.message}")
+                        Toast.makeText(context, "网络错误: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
                     } finally { isLoggingIn = false }
                 }
             },

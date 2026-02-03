@@ -22,7 +22,9 @@ import com.dee.android.pbl.takechinahome.admin.data.model.AdminRole
 import com.dee.android.pbl.takechinahome.admin.ui.screens.*
 import com.dee.android.pbl.takechinahome.admin.ui.theme.TakeChinaHomeAdminTheme
 import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
+import com.dee.android.pbl.takechinahome.admin.viewmodel.OrderViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.collectAsState
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,36 +44,49 @@ fun AdminMainContainer() {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("admin_prefs", Context.MODE_PRIVATE) }
 
-    // 1. 登录状态持久化逻辑
+    // --- 状态变量 (由 remember 驱动，确保实时刷新) ---
     var isLoggedIn by remember { mutableStateOf(prefs.getBoolean("is_logged_in", false)) }
+    var currentManagerId by remember { mutableIntStateOf(prefs.getInt("user_id", 0)) }
+    var userName by remember { mutableStateOf(prefs.getString("user_name", "员工") ?: "员工") }
     var userRole by remember {
         val savedRole = prefs.getString("user_role", AdminRole.USER.name) ?: AdminRole.USER.name
-        mutableStateOf(AdminRole.valueOf(savedRole))
+        mutableStateOf(try { AdminRole.valueOf(savedRole) } catch(e: Exception) { AdminRole.USER })
     }
-    var userName by remember { mutableStateOf(prefs.getString("user_name", "员工") ?: "员工") }
 
-    // 2. 界面控制状态
+    // 界面控制
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentScreen by remember { mutableStateOf("置换审核") }
     var refreshSignal by remember { mutableLongStateOf(0L) }
 
-    // 获取 ViewModel
+    // ViewModels
     val auditViewModel: AuditViewModel = viewModel()
+    val orderViewModel: OrderViewModel = viewModel()
+    val orders by orderViewModel.orders.collectAsState()
     val pendingCount = auditViewModel.uiState.value.allItems.count { it.status == 1 }
 
-    // --- 逻辑判断：未登录则显示登录页 ---
+    // 1. 登录拦截逻辑
     if (!isLoggedIn) {
         AdminLoginScreen(onLoginSuccess = { user ->
-            isLoggedIn = true
-            userRole = user.role  // 确保 AdminUserInfo 里的 role 也是 AdminRole 类型
+            // ✨ 核心修正：立即同步内存状态
+            currentManagerId = user.id
             userName = user.name
-            currentScreen = "置换审核"
+            userRole = user.role
+            isLoggedIn = true
+
+            // ✨ 同步持久化存储
+            prefs.edit().apply {
+                putBoolean("is_logged_in", true)
+                putInt("user_id", user.id)
+                putString("user_name", user.name)
+                putString("user_role", user.role.name)
+                apply()
+            }
+            android.util.Log.d("ID_CHECK", "登录成功！当前内存 ID: $currentManagerId")
         })
         return
     }
 
-    // --- 以下为已登录后的主界面逻辑 ---
-
+    // 2. 主界面逻辑 (已登录)
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
@@ -91,22 +106,18 @@ fun AdminMainContainer() {
                 }
                 HorizontalDivider()
 
-                // ✨ 权限过滤逻辑：定义所有菜单，然后根据 role 过滤
                 val allMenuItems = listOf(
                     Triple("产品上架", Icons.Default.AddBox, "all"),
                     Triple("置换审核", Icons.Default.CheckCircle, "all"),
                     Triple("产品管理", Icons.Default.List, "all"),
                     Triple("礼品发布", Icons.Default.CardGiftcard, "all"),
                     Triple("订单管理", Icons.Default.Chat, "all"),
-                    Triple("用户管理", Icons.Default.People, "admin"), // 仅 admin 可见
-                    Triple("数据看板", Icons.Default.Assessment, "admin") // 仅 admin 可见
+                    Triple("用户管理", Icons.Default.People, "admin"),
+                    Triple("数据看板", Icons.Default.Assessment, "admin")
                 )
 
                 allMenuItems.forEach { (title, icon, requiredRole) ->
-                    // 将 userRole.name (即 "ADMIN" 或 "USER") 与字符串比较
-                    // 注意：AdminRole.ADMIN.name 通常是大写的 "ADMIN"，请确保逻辑一致
                     val hasPermission = requiredRole == "all" || userRole == AdminRole.ADMIN
-
                     if (hasPermission) {
                         NavigationDrawerItem(
                             icon = { Icon(icon, contentDescription = null) },
@@ -123,7 +134,6 @@ fun AdminMainContainer() {
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // 退出登录按钮
                 NavigationDrawerItem(
                     icon = { Icon(Icons.Default.ExitToApp, contentDescription = null) },
                     label = { Text("退出登录") },
@@ -131,6 +141,7 @@ fun AdminMainContainer() {
                     onClick = {
                         prefs.edit().clear().apply()
                         isLoggedIn = false
+                        currentManagerId = 0
                     },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
@@ -151,8 +162,8 @@ fun AdminMainContainer() {
                         IconButton(onClick = {
                             when (currentScreen) {
                                 "置换审核" -> auditViewModel.fetchPendingItems()
-                                "产品管理" -> refreshSignal = System.currentTimeMillis()
-                                "用户管理" -> refreshSignal = System.currentTimeMillis() // 假设用户管理也支持刷新
+                                "产品管理", "用户管理" -> refreshSignal = System.currentTimeMillis()
+                                "订单管理" -> orderViewModel.fetchOrders(currentManagerId)
                                 else -> Toast.makeText(context, "$currentScreen 暂不支持刷新", Toast.LENGTH_SHORT).show()
                             }
                         }) {
@@ -192,20 +203,25 @@ fun AdminMainContainer() {
                     "产品管理" -> ProductListScreen(refreshSignal = refreshSignal)
                     "礼品发布" -> GiftDevScreen(auditViewModel = auditViewModel)
                     "用户管理" -> if (userRole == AdminRole.ADMIN) UserManagerScreen() else PlaceholderScreen("权限不足")
-                    "订单管理" -> PlaceholderScreen("订单管理 (开发中...)")
+                    "订单管理" -> {
+                        // 自动刷新逻辑
+                        LaunchedEffect(currentManagerId) {
+                            if (currentManagerId != 0) {
+                                orderViewModel.fetchOrders(currentManagerId)
+                            }
+                        }
+
+                        OrderManagementScreen(
+                            orders = orders,
+                            managerId = currentManagerId, // ✨ 补全缺失参数
+                            onRefresh = { id -> orderViewModel.fetchOrders(id) }, // ✨ 补全缺失参数
+                            onConfirmIntent = { id -> orderViewModel.confirmIntent(id, currentManagerId) },
+                            onCompleteOrder = { id -> orderViewModel.completeOrder(id, currentManagerId) }
+                        )
+                    }
                     else -> PlaceholderScreen(currentScreen)
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun ProductUploadPlaceholder() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.LightGray)
-            Text("产品上架功能模块", color = Color.Gray)
         }
     }
 }

@@ -89,9 +89,13 @@ fun GiftDevScreen(auditViewModel: AuditViewModel) {
     LaunchedEffect(Unit) {
         isLoadingOfficial = true
         try {
-            val data = RetrofitClient.adminService.getGifts()
-            officialGifts.addAll(data)
-        } catch (e: Exception) { e.printStackTrace() } finally { isLoadingOfficial = false }
+            val response = RetrofitClient.adminService.getGifts() // 获取包装类
+            if (response.success) {
+                response.data?.let { officialGifts.addAll(it) } // 从 .data 中取回列表
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     Column(
@@ -152,16 +156,20 @@ fun GiftDevScreen(auditViewModel: AuditViewModel) {
                         val imgRes = imgTask.await()
                         val txtRes = txtTask.await()
 
-                        if (imgRes.success) generatedImageUrl = imgRes.image_url
+                        // 处理图片结果
+                        if (imgRes.success) {
+                            generatedImageUrl = imgRes.imageUrl // 这里直接用 imgRes 因为它返回的是 ImageResponse 结构
+                        }
 
-                        // 文案生成策略：API失败则回退至本地模板
-                        generatedCopywriting = if (txtRes.success && !txtRes.refined_text.isNullOrBlank()) {
-                            txtRes.refined_text
+                        // 处理文案结果
+                        generatedCopywriting = if (txtRes.success && !txtRes.refinedText.isNullOrBlank()) {
+                            txtRes.refinedText!!
                         } else {
                             "【$posterTheme】\n甄选 $productStr \n$copyStyleReq，传递东方温情。"
                         }
 
                     } catch (e: Exception) {
+                        android.util.Log.e("GiftDev", "Error: ${e.message}")
                         Toast.makeText(context, "生成失败: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
                     } finally { isGenerating = false }
                 }
