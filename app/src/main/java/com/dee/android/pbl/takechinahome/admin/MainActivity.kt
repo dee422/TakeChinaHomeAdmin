@@ -1,5 +1,6 @@
 package com.dee.android.pbl.takechinahome.admin
 
+import android.content.Context
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -17,10 +18,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.dee.android.pbl.takechinahome.admin.ui.screens.AuditDashboardScreen
-import com.dee.android.pbl.takechinahome.admin.ui.screens.GiftDevScreen
-import com.dee.android.pbl.takechinahome.admin.ui.screens.ProductListScreen
-import com.dee.android.pbl.takechinahome.admin.ui.screens.ProductUploadScreen
+import com.dee.android.pbl.takechinahome.admin.data.model.AdminRole
+import com.dee.android.pbl.takechinahome.admin.ui.screens.*
 import com.dee.android.pbl.takechinahome.admin.ui.theme.TakeChinaHomeAdminTheme
 import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
 import kotlinx.coroutines.launch
@@ -40,17 +39,38 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AdminMainContainer() {
     val context = LocalContext.current
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val prefs = remember { context.getSharedPreferences("admin_prefs", Context.MODE_PRIVATE) }
+
+    // 1. 登录状态持久化逻辑
+    var isLoggedIn by remember { mutableStateOf(prefs.getBoolean("is_logged_in", false)) }
+    var userRole by remember {
+        val savedRole = prefs.getString("user_role", AdminRole.USER.name) ?: AdminRole.USER.name
+        mutableStateOf(AdminRole.valueOf(savedRole))
+    }
+    var userName by remember { mutableStateOf(prefs.getString("user_name", "员工") ?: "员工") }
+
+    // 2. 界面控制状态
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentScreen by remember { mutableStateOf("置换审核") }
     var refreshSignal by remember { mutableLongStateOf(0L) }
 
     // 获取 ViewModel
     val auditViewModel: AuditViewModel = viewModel()
-
-    // ✨ 核心修正：通过 uiState 动态计算待审核数量 (status == 1)
-    // 这样当后端数据刷新或管理员点击审核后，这个数字会自动变动
     val pendingCount = auditViewModel.uiState.value.allItems.count { it.status == 1 }
+
+    // --- 逻辑判断：未登录则显示登录页 ---
+    if (!isLoggedIn) {
+        AdminLoginScreen(onLoginSuccess = { user ->
+            isLoggedIn = true
+            userRole = user.role  // 确保 AdminUserInfo 里的 role 也是 AdminRole 类型
+            userName = user.name
+            currentScreen = "置换审核"
+        })
+        return
+    }
+
+    // --- 以下为已登录后的主界面逻辑 ---
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -61,40 +81,63 @@ fun AdminMainContainer() {
         drawerContent = {
             ModalDrawerSheet {
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "雅鉴管理后台",
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                HorizontalDivider()
-
-                val menuItems = listOf(
-                    "产品上架" to Icons.Default.AddBox,
-                    "置换审核" to Icons.Default.CheckCircle,
-                    "产品管理" to Icons.Default.List,
-                    "礼品发布" to Icons.Default.CardGiftcard,
-                    "订单管理" to Icons.Default.Chat,
-                    "用户管理" to Icons.Default.People,
-                    "数据看板" to Icons.Default.Assessment
-                )
-
-                menuItems.forEach { (title, icon) ->
-                    NavigationDrawerItem(
-                        icon = { Icon(icon, contentDescription = null) },
-                        label = { Text(title) },
-                        selected = currentScreen == title,
-                        onClick = {
-                            currentScreen = title
-                            scope.launch { drawerState.close() }
-                        },
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                Column(Modifier.padding(horizontal = 28.dp, vertical = 16.dp)) {
+                    Text(text = "雅鉴管理后台", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        text = "欢迎您，$userName (${if (userRole == AdminRole.ADMIN) "管理员" else "经理"})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
                     )
                 }
+                HorizontalDivider()
+
+                // ✨ 权限过滤逻辑：定义所有菜单，然后根据 role 过滤
+                val allMenuItems = listOf(
+                    Triple("产品上架", Icons.Default.AddBox, "all"),
+                    Triple("置换审核", Icons.Default.CheckCircle, "all"),
+                    Triple("产品管理", Icons.Default.List, "all"),
+                    Triple("礼品发布", Icons.Default.CardGiftcard, "all"),
+                    Triple("订单管理", Icons.Default.Chat, "all"),
+                    Triple("用户管理", Icons.Default.People, "admin"), // 仅 admin 可见
+                    Triple("数据看板", Icons.Default.Assessment, "admin") // 仅 admin 可见
+                )
+
+                allMenuItems.forEach { (title, icon, requiredRole) ->
+                    // 将 userRole.name (即 "ADMIN" 或 "USER") 与字符串比较
+                    // 注意：AdminRole.ADMIN.name 通常是大写的 "ADMIN"，请确保逻辑一致
+                    val hasPermission = requiredRole == "all" || userRole == AdminRole.ADMIN
+
+                    if (hasPermission) {
+                        NavigationDrawerItem(
+                            icon = { Icon(icon, contentDescription = null) },
+                            label = { Text(title) },
+                            selected = currentScreen == title,
+                            onClick = {
+                                currentScreen = title
+                                scope.launch { drawerState.close() }
+                            },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // 退出登录按钮
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Default.ExitToApp, contentDescription = null) },
+                    label = { Text("退出登录") },
+                    selected = false,
+                    onClick = {
+                        prefs.edit().clear().apply()
+                        isLoggedIn = false
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     ) {
-
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
@@ -105,28 +148,17 @@ fun AdminMainContainer() {
                         }
                     },
                     actions = {
-                        // 1. 刷新按钮：多页面联动逻辑
                         IconButton(onClick = {
                             when (currentScreen) {
                                 "置换审核" -> auditViewModel.fetchPendingItems()
-                                "产品管理" -> {
-                                    // ✨ 核心：改变时间戳信号，触发 ProductListScreen 刷新
-                                    refreshSignal = System.currentTimeMillis()
-                                }
-                                else -> {
-                                    Toast.makeText(context, "$currentScreen 暂不支持刷新", Toast.LENGTH_SHORT).show()
-                                }
+                                "产品管理" -> refreshSignal = System.currentTimeMillis()
+                                "用户管理" -> refreshSignal = System.currentTimeMillis() // 假设用户管理也支持刷新
+                                else -> Toast.makeText(context, "$currentScreen 暂不支持刷新", Toast.LENGTH_SHORT).show()
                             }
                         }) {
                             Icon(Icons.Default.Refresh, contentDescription = "刷新")
                         }
 
-                        // 2. 搜索按钮
-                        IconButton(onClick = { /* 搜索逻辑待实现 */ }) {
-                            Icon(Icons.Default.Search, contentDescription = "搜索")
-                        }
-
-                        // 3. 用户头像 + 动态 Badge
                         Box(modifier = Modifier.padding(end = 12.dp)) {
                             BadgedBox(
                                 badge = {
@@ -140,7 +172,7 @@ fun AdminMainContainer() {
                                 Surface(
                                     modifier = Modifier.size(32.dp),
                                     shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primaryContainer
+                                    color = if (userRole == AdminRole.ADMIN) MaterialTheme.colorScheme.primaryContainer else Color.LightGray
                                 ) {
                                     Icon(Icons.Default.AccountCircle, contentDescription = "用户中心")
                                 }
@@ -150,19 +182,17 @@ fun AdminMainContainer() {
                 )
             }
         ) { innerPadding ->
-            // 内容分发区
             Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
                 color = MaterialTheme.colorScheme.background
             ) {
                 when (currentScreen) {
                     "置换审核" -> AuditDashboardScreen(viewModel = auditViewModel)
                     "产品上架" -> ProductUploadScreen()
-                    // ✨ 传入 refreshSignal
                     "产品管理" -> ProductListScreen(refreshSignal = refreshSignal)
                     "礼品发布" -> GiftDevScreen(auditViewModel = auditViewModel)
+                    "用户管理" -> if (userRole == AdminRole.ADMIN) UserManagerScreen() else PlaceholderScreen("权限不足")
+                    "订单管理" -> PlaceholderScreen("订单管理 (开发中...)")
                     else -> PlaceholderScreen(currentScreen)
                 }
             }

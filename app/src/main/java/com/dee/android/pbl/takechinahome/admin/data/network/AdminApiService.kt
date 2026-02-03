@@ -1,14 +1,17 @@
 package com.dee.android.pbl.takechinahome.admin.data.network
 
+import com.dee.android.pbl.takechinahome.admin.data.model.AdminUserInfo
 import com.dee.android.pbl.takechinahome.admin.data.model.ApiResponse
 import com.dee.android.pbl.takechinahome.admin.data.model.ExchangeGift
 import com.dee.android.pbl.takechinahome.admin.ui.screens.AdminGift
+import com.dee.android.pbl.takechinahome.admin.data.model.AdminUser
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.POST
 
-// 定义 AI 专用返回模型（如果不想写在单独文件里，可以放在这里）
+// --- 1. AI 辅助功能相关模型 ---
+
 data class AiRefineResult(
     val success: Boolean,
     val refined_text: String?,
@@ -23,13 +26,24 @@ data class ImageResponse(
 
 data class TextResponse(
     val success: Boolean,
-    val refined_text: String?, // 建议与 AI 润色接口保持一致字段名，方便复用
+    val refined_text: String?,
     val message: String?
 )
 
+// --- 2. 用户管理相关模型 ---
+
+data class AdminUser(
+    val email: String,
+    val name: String,
+    val role: String, // "admin" 或 "user"
+    val createdAt: String
+)
+
+// --- 3. 核心 API 接口 ---
+
 interface AdminApiService {
 
-    // --- 1. 市场审核相关 ---
+    // --- A. 市场审核相关 ---
 
     @GET("get_pending_items.php")
     suspend fun getPendingItems(): ApiResponse<List<ExchangeGift>>
@@ -43,7 +57,7 @@ interface AdminApiService {
     ): ApiResponse<Unit>
 
 
-    // --- 2. 产品上架与库管理相关 ---
+    // --- B. 产品上架与库管理相关 ---
 
     @GET("get_gifts.php")
     suspend fun getGifts(): List<AdminGift>
@@ -75,11 +89,8 @@ interface AdminApiService {
     ): ApiResponse<Unit>
 
 
-    // --- 3. AI 辅助功能 (文本润色 & 图像生图) ---
+    // --- C. AI 辅助功能 (文本与图像) ---
 
-    /**
-     * AI 文本润色：用于补全描述文案
-     */
     @FormUrlEncoded
     @POST("ai_proxy.php")
     suspend fun refineText(
@@ -89,11 +100,8 @@ interface AdminApiService {
         @Field("samples") samples: String
     ): AiRefineResult
 
-    /**
-     * AI 海报生图：用于礼品开发模块
-     */
     @FormUrlEncoded
-    @POST("image_proxy.php") // 对应你上传的 PHP 文件名
+    @POST("image_proxy.php")
     suspend fun generateImage(
         @Field("provider") provider: String,
         @Field("api_key") apiKey: String,
@@ -101,15 +109,43 @@ interface AdminApiService {
         @Field("no_chinese") noChinese: Boolean
     ): ImageResponse
 
-    /**
-     * AI 营销文案生成：专门生成带产品气息的营销语
-     */
     @FormUrlEncoded
-    @POST("ai_proxy.php") // 统一使用这个代理，通过 prompt 区分任务
+    @POST("ai_proxy.php")
     suspend fun generateMarketingCopy(
         @Field("provider") provider: String,
         @Field("api_key") apiKey: String,
-        @Field("text") prompt: String, // 统一使用 text 字段名，因为后台 php 往往接收这个
-        @Field("samples") samples: String = "" // 传空即可
+        @Field("text") prompt: String,
+        @Field("samples") samples: String = ""
     ): TextResponse
+
+    // --- D. 账户权限与用户管理 ---
+
+    /**
+     * 登录接口：验证身份并获取 role
+     */
+    @FormUrlEncoded
+    @POST("admin_login.php")
+    suspend fun login(
+        @Field("email") email: String,
+        @Field("password") password: String
+    ): ApiResponse<AdminUserInfo>
+
+    /**
+     * 创建后台用户：由管理员操作
+     */
+    @FormUrlEncoded
+    @POST("create_admin_user.php")
+    suspend fun createAdminUser(
+        @Field("email") email: String,
+        @Field("password") password: String,
+        @Field("name") name: String,
+        @Field("role") role: String, // "admin" 或 "user"
+        @Field("admin_token") adminToken: String = "secret_admin_key"
+    ): ApiResponse<Unit>
+
+    /**
+     * 获取所有后台用户列表
+     */
+    @GET("get_admin_users.php")
+    suspend fun getAdminUsers(): ApiResponse<List<AdminUser>>
 }

@@ -21,10 +21,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+            // 开启混淆和代码压缩
+            isMinifyEnabled = true
+            isShrinkResources = true
+            // 默认混淆规则
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             )
         }
     }
@@ -67,4 +68,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.6.0")
 
     implementation("com.google.code.gson:gson:2.10.1")
+
+    implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
 }
