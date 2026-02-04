@@ -5,8 +5,7 @@ import com.dee.android.pbl.takechinahome.admin.ui.screens.AdminGift
 import com.google.gson.annotations.SerializedName
 import retrofit2.http.*
 
-// --- AI 相关响应模型 ---
-// 增加注解确保字段映射准确，同时符合 Kotlin 命名规范
+// --- 保留原有模型，绝对不改名 ---
 data class AiRefineResult(
     val success: Boolean,
     @SerializedName("refined_text") val refinedText: String?,
@@ -25,7 +24,6 @@ data class TextResponse(
     val message: String?
 )
 
-// --- 核心 API 接口 ---
 interface AdminApiService {
 
     // --- A. 市场审核相关 ---
@@ -68,7 +66,7 @@ interface AdminApiService {
     @POST("delete_gift_admin.php")
     suspend fun deleteGift(@Field("id") id: Int): ApiResponse<Any?>
 
-    // --- C. AI 辅助功能 ---
+    // --- C. AI 辅助功能 (严禁改动此处，修复 GiftDevScreen 报错) ---
     @FormUrlEncoded
     @POST("ai_proxy.php")
     suspend fun refineText(
@@ -92,7 +90,7 @@ interface AdminApiService {
     suspend fun generateMarketingCopy(
         @Field("provider") provider: String,
         @Field("api_key") apiKey: String,
-        @Field("text") prompt: String,
+        @Field("text") text: String, // 保持变量名为 text
         @Field("samples") samples: String = ""
     ): TextResponse
 
@@ -117,7 +115,7 @@ interface AdminApiService {
     @GET("get_admin_users.php")
     suspend fun getAdminUsers(): ApiResponse<List<AdminUser>>
 
-    // --- E. 订单管理 ---
+    // --- E. 订单管理 (新增功能区) ---
     @GET("get_intent_orders.php")
     suspend fun getIntentOrders(
         @Query("manager_id") managerId: Int
@@ -133,4 +131,16 @@ interface AdminApiService {
 
     @GET("get_ai_suggestion.php")
     suspend fun getAiSuggestion(@Query("order_id") orderId: Int): ApiResponse<String>
+
+    // ✨ 专门为解决 OrderManagementScreen 报错新增的方法
+    @FormUrlEncoded
+    @POST("update_order_intent.php")
+    suspend fun updateOrderIntent(
+        @Field("order_id") orderId: Int,
+        @Field("target_gift_name") giftName: String,
+        @Field("target_qty") qty: Int,
+        @Field("delivery_date") date: String,
+        @Field("contact_method") contact: String,
+        @Field("intent_confirm_status") status: Int
+    ): ApiResponse<Any?>
 }

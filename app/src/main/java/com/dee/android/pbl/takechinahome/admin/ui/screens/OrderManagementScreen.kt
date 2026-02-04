@@ -1,10 +1,13 @@
 package com.dee.android.pbl.takechinahome.admin.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,7 +33,6 @@ fun OrderManagementScreen(
     onConfirmIntent: (Int) -> Unit,
     onCompleteOrder: (Int) -> Unit
 ) {
-    // 弹窗控制状态
     var showChatSheet by remember { mutableStateOf(false) }
     var activeChatOrder by remember { mutableStateOf<Order?>(null) }
     val sheetState = rememberModalBottomSheetState()
@@ -77,7 +80,6 @@ fun OrderManagementScreen(
                             onConfirm = { onConfirmIntent(order.id) },
                             onComplete = { onCompleteOrder(order.id) },
                             onChatClick = { selectedOrder ->
-                                // ✨ 修正：点击时正确赋值并弹出底栏
                                 activeChatOrder = selectedOrder
                                 showChatSheet = true
                             }
@@ -87,14 +89,17 @@ fun OrderManagementScreen(
             }
         }
 
-        // 底部对话弹窗 (ModalBottomSheet)
         if (showChatSheet && activeChatOrder != null) {
             ModalBottomSheet(
                 onDismissRequest = { showChatSheet = false },
                 sheetState = sheetState,
                 containerColor = MaterialTheme.colorScheme.surface
             ) {
-                ChatBottomSheetContent(activeChatOrder!!)
+                ChatBottomSheetContent(
+                    order = activeChatOrder!!,
+                    onDismiss = { showChatSheet = false },
+                    onDataChanged = { onRefresh(managerId) }
+                )
             }
         }
     }
@@ -120,7 +125,6 @@ fun OrderCard(
         elevation = CardDefaults.cardElevation(if (isCompleted) 1.dp else 4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // 头部：单号与状态
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text("单号: #${order.id}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
@@ -133,7 +137,6 @@ fun OrderCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 客户信息
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -146,7 +149,6 @@ fun OrderCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 礼品详情
             Text("拟选清单:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
             order.details.forEach { item ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
@@ -157,7 +159,6 @@ fun OrderCard(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp)
 
-            // AI 建议区
             Surface(
                 onClick = { onChatClick(order) },
                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
@@ -169,10 +170,10 @@ fun OrderCard(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(4.dp))
-                            Text("AI 助攻话术", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                            Text("意向核对助手", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                         }
                         Text(
-                            order.aiSuggestion ?: "正在构思引导话术...",
+                            order.aiSuggestion ?: "点击完善意向信息...",
                             fontSize = 12.sp, maxLines = 2, color = Color.DarkGray
                         )
                     }
@@ -182,7 +183,6 @@ fun OrderCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 按钮操作区
             if (!isCompleted) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (order.isIntent == 1) {
@@ -201,70 +201,146 @@ fun OrderCard(
 }
 
 @Composable
-fun ChatBottomSheetContent(order: Order) {
-    var aiContent by remember { mutableStateOf(order.aiSuggestion ?: "正在为您构思引导话术...") }
-    var isLoading by remember { mutableStateOf(false) }
+fun ChatBottomSheetContent(
+    order: Order,
+    onDismiss: () -> Unit,
+    onDataChanged: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    // 弹窗打开时，如果内容为空或仍为占位符，自动触发 API 请求
+    // ✨ 修正逻辑：从原始 details 获取 name 和 qty 的参考值
+    val refItem = order.details.firstOrNull()
+    val refName = refItem?.name ?: ""
+    val refQty = refItem?.qty ?: 0
+
+    // 1. 本地编辑状态：若 target 字段为默认值，则自动填充 ref 参考值
+    var giftName by remember {
+        mutableStateOf(if (order.targetGiftName == "待定" || order.targetGiftName.isNullOrEmpty()) refName else order.targetGiftName)
+    }
+    var qty by remember {
+        mutableStateOf(if (order.targetQty == 0) refQty.toString() else order.targetQty.toString())
+    }
+    // ✨ 核心修正：交货时间不再看 spec，由经理手动输入或 AI 提醒补全
+    var date by remember { mutableStateOf(order.deliveryDate ?: "待定") }
+    var contact by remember { mutableStateOf(order.contactMethod ?: "待定") }
+
+    var aiReminder by remember { mutableStateOf(order.aiSuggestion ?: "正在分析采集进度...") }
+    var isSaving by remember { mutableStateOf(false) }
+    var isAiLoading by remember { mutableStateOf(false) }
+
+    val isLocked = order.intentConfirmStatus == 1
+
     LaunchedEffect(order.id) {
-        if (order.aiSuggestion.isNullOrBlank() || order.aiSuggestion == "测试") {
-            isLoading = true
+        if (order.aiSuggestion == null || order.aiSuggestion == "待定") {
+            isAiLoading = true
             try {
                 val response = RetrofitClient.adminService.getAiSuggestion(order.id)
-                if (response.success) {
-                    aiContent = response.data ?: "AI 暂时没有给出建议"
-                }
-            } catch (e: Exception) {
-                aiContent = "分析失败: ${e.message}"
+                if (response.success) aiReminder = response.data ?: ""
             } finally {
-                isLoading = false
+                isAiLoading = false
             }
         }
     }
 
-    Column(modifier = Modifier.padding(16.dp).padding(bottom = 32.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(8.dp))
-            Text("AI 沟通助手", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        }
+    Column(modifier = Modifier
+        .padding(16.dp)
+        .padding(bottom = 32.dp)
+        .verticalScroll(rememberScrollState())
+    ) {
+        Text("意向卷宗采集", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(16.dp))
 
-        Text(
-            text = "本话术已根据您的要求，引导客户确认：品名、数量、交货时间及联系方式。",
-            fontSize = 12.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-            ),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Box(modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth()
-                .heightIn(min = 100.dp) // ✨ 修正：使用 heightIn 并指定 min
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp).align(Alignment.Center))
+            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (isAiLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
-                    Text(text = aiContent, lineHeight = 22.sp, fontSize = 15.sp)
+                    Icon(Icons.Default.TipsAndUpdates, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 }
+                Spacer(Modifier.width(8.dp))
+                Text(text = aiReminder, fontSize = 13.sp, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.weight(1f))
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+
+        // 结构化输入框组
+        IntentField("意向礼品名称", giftName, isLocked) { giftName = it }
+        IntentField("意向数量", qty, isLocked) { qty = it }
+        IntentField("期望交货时间", date, isLocked) { date = it }
+        IntentField("联系方式及时间", contact, isLocked) { contact = it }
+
+        Spacer(Modifier.height(24.dp))
 
         Button(
-            onClick = { /* 这里可以接入系统 ClipboardManager 复制文本 */ },
+            onClick = {
+                scope.launch {
+                    isSaving = true
+                    try {
+                        val res = RetrofitClient.adminService.updateOrderIntent(
+                            orderId = order.id,
+                            giftName = giftName,
+                            qty = qty.toIntOrNull() ?: 0,
+                            date = date,
+                            contact = contact,
+                            status = 1
+                        )
+                        if (res.success) {
+                            Toast.makeText(context, "意向单已生成并锁定", Toast.LENGTH_SHORT).show()
+                            onDataChanged()
+                            onDismiss()
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    } finally {
+                        isSaving = false
+                    }
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading
+            enabled = !isLocked && !isSaving,
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
-            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("复制引导话术")
+            if (isSaving) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+            } else {
+                Text(if (isLocked) "意向单已锁定（经理跟进中）" else "确认信息并生成意向单")
+            }
+        }
+
+        if (!isLocked) {
+            Text(
+                "注：锁定后信息将同步给经理，且不可在客户端修改。",
+                fontSize = 11.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally)
+            )
         }
     }
+}
+
+@Composable
+fun IntentField(label: String, value: String, isLocked: Boolean, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        enabled = !isLocked,
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(
+            disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    )
 }
 
 fun getStatusColor(status: String): Color {
