@@ -17,6 +17,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dee.android.pbl.takechinahome.admin.data.model.Order
+import com.dee.android.pbl.takechinahome.admin.data.network.RetrofitClient
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,7 +29,7 @@ fun OrderManagementScreen(
     onConfirmIntent: (Int) -> Unit,
     onCompleteOrder: (Int) -> Unit
 ) {
-    // 1. 弹窗控制状态
+    // 弹窗控制状态
     var showChatSheet by remember { mutableStateOf(false) }
     var activeChatOrder by remember { mutableStateOf<Order?>(null) }
     val sheetState = rememberModalBottomSheetState()
@@ -74,9 +76,9 @@ fun OrderManagementScreen(
                             order = order,
                             onConfirm = { onConfirmIntent(order.id) },
                             onComplete = { onCompleteOrder(order.id) },
-                            onChatClick = { clickedOrder ->
-                                // ✨ 点击时：保存当前选中的订单并弹出底栏
-                                activeChatOrder = clickedOrder
+                            onChatClick = { selectedOrder ->
+                                // ✨ 修正：点击时正确赋值并弹出底栏
+                                activeChatOrder = selectedOrder
                                 showChatSheet = true
                             }
                         )
@@ -85,11 +87,12 @@ fun OrderManagementScreen(
             }
         }
 
-        // 2. ✨ 底部对话弹窗 (ModalBottomSheet)
+        // 底部对话弹窗 (ModalBottomSheet)
         if (showChatSheet && activeChatOrder != null) {
             ModalBottomSheet(
                 onDismissRequest = { showChatSheet = false },
-                sheetState = sheetState
+                sheetState = sheetState,
+                containerColor = MaterialTheme.colorScheme.surface
             ) {
                 ChatBottomSheetContent(activeChatOrder!!)
             }
@@ -154,7 +157,7 @@ fun OrderCard(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp)
 
-            // ✨ AI 建议区（点击进入对话）
+            // AI 建议区
             Surface(
                 onClick = { onChatClick(order) },
                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
@@ -166,10 +169,10 @@ fun OrderCard(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(4.dp))
-                            Text("AI 话术建议", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                            Text("AI 助攻话术", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                         }
                         Text(
-                            order.aiSuggestion ?: "点击分析该客户的潜在置换价值...",
+                            order.aiSuggestion ?: "正在构思引导话术...",
                             fontSize = 12.sp, maxLines = 2, color = Color.DarkGray
                         )
                     }
@@ -199,26 +202,67 @@ fun OrderCard(
 
 @Composable
 fun ChatBottomSheetContent(order: Order) {
-    Column(modifier = Modifier.padding(16.dp).padding(bottom = 32.dp)) {
-        Text("AI 沟通助手", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Spacer(Modifier.height(16.dp))
-        Text("针对订单 #${order.id} 的建议：", color = Color.Gray, fontSize = 12.sp)
+    var aiContent by remember { mutableStateOf(order.aiSuggestion ?: "正在为您构思引导话术...") }
+    var isLoading by remember { mutableStateOf(false) }
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-        ) {
-            Text(
-                text = order.aiSuggestion ?: "正在深度分析客户偏好...",
-                modifier = Modifier.padding(16.dp),
-                lineHeight = 22.sp
-            )
+    // 弹窗打开时，如果内容为空或仍为占位符，自动触发 API 请求
+    LaunchedEffect(order.id) {
+        if (order.aiSuggestion.isNullOrBlank() || order.aiSuggestion == "测试") {
+            isLoading = true
+            try {
+                val response = RetrofitClient.adminService.getAiSuggestion(order.id)
+                if (response.success) {
+                    aiContent = response.data ?: "AI 暂时没有给出建议"
+                }
+            } catch (e: Exception) {
+                aiContent = "分析失败: ${e.message}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    Column(modifier = Modifier.padding(16.dp).padding(bottom = 32.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(8.dp))
+            Text("AI 沟通助手", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
 
-        Button(onClick = { /* TODO: 复制话术 */ }, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "本话术已根据您的要求，引导客户确认：品名、数量、交货时间及联系方式。",
+            fontSize = 12.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+            ),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+        ) {
+            Box(modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth()
+                .heightIn(min = 100.dp) // ✨ 修正：使用 heightIn 并指定 min
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp).align(Alignment.Center))
+                } else {
+                    Text(text = aiContent, lineHeight = 22.sp, fontSize = 15.sp)
+                }
+            }
+        }
+
+        Button(
+            onClick = { /* 这里可以接入系统 ClipboardManager 复制文本 */ },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading
+        ) {
             Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("复制 AI 建议话术")
+            Text("复制引导话术")
         }
     }
 }

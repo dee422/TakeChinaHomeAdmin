@@ -130,4 +130,7 @@ interface AdminApiService {
         @Field("status") status: String,
         @Field("is_intent") isIntent: Int
     ): ApiResponse<Any?>
+
+    @GET("get_ai_suggestion.php")
+    suspend fun getAiSuggestion(@Query("order_id") orderId: Int): ApiResponse<String>
 }
