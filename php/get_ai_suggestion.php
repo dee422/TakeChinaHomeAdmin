@@ -16,7 +16,7 @@ if ($order_id <= 0) {
 
 try {
     // 2. 获取订单详情（关联查询订单详情，让 AI 知道客户买了什么）
-    $stmt = $pdo->prepare("SELECT contact_name, ai_suggestion FROM orders WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT contact_name, ai_suggestion, target_gift_name, target_qty, delivery_date, contact_method FROM orders WHERE id = ?");
     $stmt->execute([$order_id]);
     $order = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -33,15 +33,23 @@ try {
 
     // 3. 准备 AI 提示词 (Prompt)
     $customer_name = $order['contact_name'];
+    $current_status = "
+    - 意向礼品：{$order['target_gift_name']}
+    - 意向数量：{$order['target_qty']}
+    - 交货时间：{$order['delivery_date']}
+    - 联系方式：{$order['contact_method']}
+    ";
     
     // 进阶：你可以通过 SQL 查询把订单里的具体礼品名字也查出来，塞进 Prompt
-    $prompt = "你是一位资深的礼品定制专家和销售教练。
-    现有客户：{$customer_name}。
-    任务：请为销售经理提供一段专业且温情的沟通话术建议。
-    要求：
-    1. 风格要优雅、专业，体现中国传统礼赠文化。
-    2. 字数在 80 字以内。
-    3. 侧重于如何引导客户从‘意向’转为‘正式下单’。";
+    $prompt = "你是一位资深的商务经理。请针对以下客户意向进度生成一段沟通话术。
+    客户姓名：{$order['contact_name']}
+    当前采集进度：{$current_status}
+    
+    任务指令：
+    1. 检查上述进度，如果字段显示为'待定'或'0'，请在话术中委婉、礼貌地引导客户提供该信息。
+    2. 如果所有信息都已明确，请生成一段确认总结，并告知将生成正式意向卷宗。
+    3. 语气要专业且温润，字数控制在100字以内。
+    4. 结尾要让客户感受到流程的严谨和服务的贴心。";
 
     // 4. 使用 cURL 调用 DeepSeek API
     $post_data = [
