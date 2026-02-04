@@ -6,9 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Inventory
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,12 +22,16 @@ import com.dee.android.pbl.takechinahome.admin.data.model.Order
 @Composable
 fun OrderManagementScreen(
     orders: List<Order>,
-    managerId: Int, // ✨ 新增参数：需要传入 managerId
-    onRefresh: (Int) -> Unit, // ✨ 新增参数：传入刷新回调
+    managerId: Int,
+    onRefresh: (Int) -> Unit,
     onConfirmIntent: (Int) -> Unit,
     onCompleteOrder: (Int) -> Unit
 ) {
-    // 🔥 这就是“保险丝”：每当进入此页面，或 managerId 发生变化，立即触发刷新
+    // 1. 弹窗控制状态
+    var showChatSheet by remember { mutableStateOf(false) }
+    var activeChatOrder by remember { mutableStateOf<Order?>(null) }
+    val sheetState = rememberModalBottomSheetState()
+
     LaunchedEffect(managerId) {
         if (managerId != 0) {
             onRefresh(managerId)
@@ -71,10 +73,25 @@ fun OrderManagementScreen(
                         OrderCard(
                             order = order,
                             onConfirm = { onConfirmIntent(order.id) },
-                            onComplete = { onCompleteOrder(order.id) }
+                            onComplete = { onCompleteOrder(order.id) },
+                            onChatClick = { clickedOrder ->
+                                // ✨ 点击时：保存当前选中的订单并弹出底栏
+                                activeChatOrder = clickedOrder
+                                showChatSheet = true
+                            }
                         )
                     }
                 }
+            }
+        }
+
+        // 2. ✨ 底部对话弹窗 (ModalBottomSheet)
+        if (showChatSheet && activeChatOrder != null) {
+            ModalBottomSheet(
+                onDismissRequest = { showChatSheet = false },
+                sheetState = sheetState
+            ) {
+                ChatBottomSheetContent(activeChatOrder!!)
             }
         }
     }
@@ -84,113 +101,124 @@ fun OrderManagementScreen(
 fun OrderCard(
     order: Order,
     onConfirm: () -> Unit,
-    onComplete: () -> Unit
+    onComplete: () -> Unit,
+    onChatClick: (Order) -> Unit
 ) {
     val isCompleted = order.status == "COMPLETED"
-    val cardAlpha = if (isCompleted) 0.5f else 1.0f
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .alpha(cardAlpha),
-        elevation = CardDefaults.cardElevation(4.dp)
+            .padding(vertical = 8.dp)
+            .alpha(if (isCompleted) 0.6f else 1.0f),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isCompleted) Color(0xFFF5F5F5) else MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(if (isCompleted) 1.dp else 4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // 顶部：单号与状态
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("单号: #${order.id}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Badge(containerColor = getStatusColor(order.status)) {
-                    Text(order.status, color = Color.White, modifier = Modifier.padding(horizontal = 4.dp))
+            // 头部：单号与状态
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("单号: #${order.id}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                    Text("跟进经理: ${order.managerName ?: "未分配"}", fontSize = 11.sp, color = Color.Gray)
                 }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // 用户信息
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Gray)
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(order.userEmail, fontSize = 13.sp, color = Color.DarkGray)
-            }
-            Text("联系人: ${order.contactName}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), thickness = 0.5.dp)
-
-            // ✨ 重点：展示选中的礼品列表 (details 现在是 List)
-            Text("拟选礼品:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.height(4.dp))
-
-            order.details.forEach { item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp)
-                        .background(Color.Gray.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                        .padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Inventory, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Gray)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = item.name, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text(text = "x${item.qty}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Badge(containerColor = getStatusColor(order.status)) {
+                    Text(order.status, color = Color.White, modifier = Modifier.padding(horizontal = 6.dp))
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // AI 建议部分
+            // 客户信息
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                    .padding(8.dp)
+            ) {
+                Text("客户: ${order.contactName}", fontWeight = FontWeight.Bold)
+                Text(order.userEmail, fontSize = 12.sp, color = Color.DarkGray)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 礼品详情
+            Text("拟选清单:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
+            order.details.forEach { item ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Text("• ${item.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text("x${item.qty}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp)
+
+            // ✨ AI 建议区（点击进入对话）
             Surface(
+                onClick = { onChatClick(order) },
                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(8.dp)) {
-                    Text("AI 评估建议:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Text(
-                        order.aiSuggestion ?: "AI 正在分析该用户的置换价值...",
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        color = Color.DarkGray
-                    )
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(4.dp))
+                            Text("AI 话术建议", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Text(
+                            order.aiSuggestion ?: "点击分析该客户的潜在置换价值...",
+                            fontSize = 12.sp, maxLines = 2, color = Color.DarkGray
+                        )
+                    }
+                    Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 操作按钮区
+            // 按钮操作区
             if (!isCompleted) {
-                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (order.isIntent == 1) {
-                        Button(
-                            onClick = onConfirm,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("确认为正式订单", fontSize = 13.sp)
+                        Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))) {
+                            Text("转为正式订单")
                         }
                     } else {
-                        OutlinedButton(
-                            onClick = onComplete,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("标记已完成", fontSize = 13.sp)
+                        OutlinedButton(onClick = onComplete) {
+                            Text("标记已交付")
                         }
                     }
                 }
-            } else {
-                Text(
-                    "—— 该卷宗已归档，不可编辑 ——",
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp),
-                    fontSize = 11.sp,
-                    color = Color.Gray
-                )
             }
+        }
+    }
+}
+
+@Composable
+fun ChatBottomSheetContent(order: Order) {
+    Column(modifier = Modifier.padding(16.dp).padding(bottom = 32.dp)) {
+        Text("AI 沟通助手", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Spacer(Modifier.height(16.dp))
+        Text("针对订单 #${order.id} 的建议：", color = Color.Gray, fontSize = 12.sp)
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+        ) {
+            Text(
+                text = order.aiSuggestion ?: "正在深度分析客户偏好...",
+                modifier = Modifier.padding(16.dp),
+                lineHeight = 22.sp
+            )
+        }
+
+        Button(onClick = { /* TODO: 复制话术 */ }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("复制 AI 建议话术")
         }
     }
 }
