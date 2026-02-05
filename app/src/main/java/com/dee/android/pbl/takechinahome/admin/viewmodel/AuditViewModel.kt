@@ -136,6 +136,14 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
         // TODO: repository.insertPendingTask(PendingTask(orderId, file.path))
 
         android.util.Log.d("Audit", "本地卷宗存根成功: ${file.absolutePath}")
+
+        // ✨ 测试代码：打印文件大小和路径，确保图片不是空的
+        if (file.exists() && file.length() > 0) {
+            android.util.Log.d("SUCCESS", "卷宗生成成功！路径: ${file.absolutePath} 大小: ${file.length()} bytes")
+            // 这里可以发一个通知或 Toast 告诉经理
+        } else {
+            android.util.Log.e("ERROR", "图片生成失败或为空文件")
+        }
     }
 
     /**
