@@ -212,15 +212,29 @@ fun AdminMainContainer() {
                         }
 
                         OrderManagementScreen(
-                            orders = orders,
-                            managerId = currentManagerId, // ✨ 补全缺失参数
-                            onRefresh = { id -> orderViewModel.fetchOrders(id) }, // ✨ 补全缺失参数
-                            // ✨ 核心修正：将确认逻辑从简单的状态修改，改为触发“转正引擎”
+                            // 1. 数据源拆分：从 auditViewModel 获取两个独立的列表
+                            intentOrders = auditViewModel.uiState.value.intentOrders,
+                            formalOrders = auditViewModel.uiState.value.formalOrders,
+
+                            managerId = currentManagerId,
+
+                            // 2. 刷新逻辑拆分：
+                            // 意向单刷新调用原有的 fetchIntentOrders
+                            onRefreshIntent = { id -> auditViewModel.fetchIntentOrders() },
+                            // 正式单刷新调用新写的 fetchFormalOrders
+                            onRefreshFormal = { auditViewModel.fetchFormalOrders() },
+
+                            // 3. 核心业务逻辑：
                             onConfirmIntent = { orderObject ->
-                                // 既然拿到了整个对象，直接塞进引擎
+                                // 触发转正引擎：生成卷宗 -> 上传 -> 迁移数据库
                                 auditViewModel.approveAndConvertOrder(orderObject)
                             },
-                            onCompleteOrder = { id -> orderViewModel.completeOrder(id, currentManagerId) }
+
+                            // 4. 完成逻辑：
+                            onCompleteOrder = { id ->
+                                // 保持原有的 orderViewModel 处理逻辑
+                                orderViewModel.completeOrder(id, currentManagerId)
+                            }
                         )
                     }
                     else -> PlaceholderScreen(currentScreen)

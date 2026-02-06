@@ -146,4 +146,16 @@ interface AdminApiService {
         @Part("intent_confirm_status") status: RequestBody,
         @Part formalImage: MultipartBody.Part?
     ): ApiResponse<Any?>
+
+    @FormUrlEncoded
+    @POST("finalize_order.php")
+    suspend fun finalizeOrder(
+        @Field("order_id") orderId: Int,
+        @Field("local_path") localPath: String,
+        @Field("manager_email") managerEmail: String
+    ): ApiResponse<Any?> // 假设你已有通用的响应模型
+
+    // --- E. 订单管理 ---
+    @GET("get_formal_orders.php")
+    suspend fun getFormalOrders(): ApiResponse<List<Order>>
 }

@@ -5,8 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -29,58 +29,81 @@ import okhttp3.RequestBody.Companion.toRequestBody
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrderManagementScreen(
-    orders: List<Order>,
+    // ✨ 修改：传入两个列表，分别对应两张表
+    intentOrders: List<Order>,
+    formalOrders: List<Order>,
     managerId: Int,
-    onRefresh: (Int) -> Unit,
-    // ✨ 关键修改：参数由 Int 改为 Order，变量名保持不变
+    onRefreshIntent: (Int) -> Unit,    // 刷新意向单 (orders表)
+    onRefreshFormal: () -> Unit,      // 刷新正式单 (formal_orders表)
     onConfirmIntent: (Order) -> Unit,
     onCompleteOrder: (Int) -> Unit
 ) {
     var showChatSheet by remember { mutableStateOf(false) }
     var activeChatOrder by remember { mutableStateOf<Order?>(null) }
     val sheetState = rememberModalBottomSheetState()
-
-    LaunchedEffect(managerId) {
-        if (managerId != 0) {
-            onRefresh(managerId)
-        }
-    }
+    val scope = rememberCoroutineScope()
 
     var selectedTabIndex by remember { mutableStateOf(0) }
     val tabs = listOf("待处理意向", "正式订单库")
 
-    val filteredOrders = if (selectedTabIndex == 0) {
-        orders.filter { it.isIntent == 1 }
-    } else {
-        orders.filter { it.isIntent == 0 }
+    // ✨ 核心逻辑：根据 Tab 自动触发对应的数据抓取
+    LaunchedEffect(selectedTabIndex, managerId) {
+        if (selectedTabIndex == 0) {
+            onRefreshIntent(managerId)
+        } else {
+            onRefreshFormal()
+        }
     }
+
+    // ✨ 根据当前 Tab 选择显示的列表
+    val currentDisplayList = if (selectedTabIndex == 0) intentOrders else formalOrders
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("卷宗管理 (订单)") })
+            TopAppBar(
+                title = { Text("卷宗管理 (订单)", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
+            // Tab 切换头
             TabRow(selectedTabIndex = selectedTabIndex) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
-                        text = { Text(title) }
+                        text = {
+                            Text(title, fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Normal)
+                        }
                     )
                 }
             }
 
-            if (filteredOrders.isEmpty()) {
+            if (currentDisplayList.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无相关卷宗", color = Color.Gray)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.TaskAlt, // 👈 显式指定参数名
+                            contentDescription = null,           // 👈 显式指定第二个参数名
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("暂无相关卷宗", color = Color.Gray)
+                    }
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-                    items(filteredOrders) { order ->
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(currentDisplayList, key = { it.id }) { order ->
                         OrderCard(
                             order = order,
-                            // ✨ 关键修改：直接传递整个 order 对象
+                            isFormalTab = selectedTabIndex == 1, // 告知卡片当前是否在正式库
                             onConfirm = { onConfirmIntent(order) },
                             onComplete = { onCompleteOrder(order.id) },
                             onChatClick = { selectedOrder ->
@@ -93,6 +116,7 @@ fun OrderManagementScreen(
             }
         }
 
+        // 详情/核对 底部弹窗
         if (showChatSheet && activeChatOrder != null) {
             ModalBottomSheet(
                 onDismissRequest = { showChatSheet = false },
@@ -102,7 +126,7 @@ fun OrderManagementScreen(
                 ChatBottomSheetContent(
                     order = activeChatOrder!!,
                     onDismiss = { showChatSheet = false },
-                    onDataChanged = { onRefresh(managerId) }
+                    onDataChanged = { onRefreshIntent(managerId) }
                 )
             }
         }
@@ -112,6 +136,7 @@ fun OrderManagementScreen(
 @Composable
 fun OrderCard(
     order: Order,
+    isFormalTab: Boolean,
     onConfirm: () -> Unit,
     onComplete: () -> Unit,
     onChatClick: (Order) -> Unit
@@ -121,81 +146,107 @@ fun OrderCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
             .alpha(if (isCompleted) 0.6f else 1.0f),
         colors = CardDefaults.cardColors(
-            containerColor = if (isCompleted) Color(0xFFF5F5F5) else MaterialTheme.colorScheme.surface
+            containerColor = if (isFormalTab) Color(0xFFF0F7F0) else MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(if (isCompleted) 1.dp else 4.dp)
+        elevation = CardDefaults.cardElevation(if (isFormalTab) 2.dp else 4.dp),
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            // 头部信息
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
-                    Text("单号: #${order.id}", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
-                    Text("跟进经理: ${order.managerName ?: "未分配"}", fontSize = 11.sp, color = Color.Gray)
+                    Text(
+                        text = if (isFormalTab) "正式单: #${order.id}" else "意向单: #${order.id}",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp,
+                        color = if (isFormalTab) Color(0xFF2E7D32) else Color.Unspecified
+                    )
+                    Text("经理: ${order.managerName ?: "System"}", fontSize = 11.sp, color = Color.Gray)
                 }
                 Badge(containerColor = getStatusColor(order.status)) {
-                    Text(order.status, color = Color.White, modifier = Modifier.padding(horizontal = 6.dp))
+                    Text(order.status, color = Color.White, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // 客户信息
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
                     .padding(8.dp)
             ) {
-                Text("客户: ${order.contactName}", fontWeight = FontWeight.Bold)
-                Text(order.userEmail, fontSize = 12.sp, color = Color.DarkGray)
+                Text("联系人: ${order.contactName}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("邮箱: ${order.userEmail}", fontSize = 12.sp, color = Color.DarkGray)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text("拟选清单:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
-            order.details.forEach { item ->
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                    Text("• ${item.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text("x${item.qty}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp)
-
-            Surface(
-                onClick = { onChatClick(order) },
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(4.dp))
-                            Text("意向核对助手", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Text(
-                            order.aiSuggestion ?: "点击完善意向信息...",
-                            fontSize = 12.sp, maxLines = 2, color = Color.DarkGray
-                        )
+            // 清单展示
+            Text("清单明细:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
+            // 如果 formal_orders 结构不同，这里可以做适配
+            if (order.details.orEmpty().isEmpty()) {
+                Text("• ${order.targetGiftName ?: "未指定"} x${order.targetQty}", fontSize = 13.sp)
+            } else {
+                order.details.orEmpty().forEach { item ->
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+                        Text("• ${item.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Text("x${item.qty}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
-                    Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            // 意向核对助手 (仅在意向阶段或正式库查看详情时显示)
+            if (!isFormalTab) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Surface(
+                    onClick = { onChatClick(order) },
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(4.dp))
+                                Text("意向核对详情", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Text(
+                                order.aiSuggestion ?: "点击完善采集信息...",
+                                fontSize = 12.sp, maxLines = 1, color = Color.DarkGray
+                            )
+                        }
+                        Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
+                    }
+                }
+            }
 
+            // 操作按钮
             if (!isCompleted) {
+                Spacer(modifier = Modifier.height(16.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (order.isIntent == 1) {
-                        Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))) {
-                            Text("转为正式订单")
+                    if (!isFormalTab) {
+                        // 在意向 Tab 显示转正按钮
+                        Button(
+                            onClick = onConfirm,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("生成正式卷宗")
                         }
                     } else {
-                        OutlinedButton(onClick = onComplete) {
-                            Text("标记已交付")
+                        // 在正式库显示交付按钮
+                        OutlinedButton(
+                            onClick = onComplete,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("完成交付")
                         }
                     }
                 }
