@@ -70,11 +70,10 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun fetchIntentOrders() {
-        _uiState.value = _uiState.value.copy(intentOrders = emptyList())
+    fun fetchIntentOrders(managerId: Int = 0) {
         viewModelScope.launch {
             try {
-                val response = RetrofitClient.adminService.getIntentOrders(0)
+                val response = RetrofitClient.adminService.getIntentOrders(managerId)
                 if (response.success) {
                     _uiState.value = _uiState.value.copy(intentOrders = response.data ?: emptyList())
                 }
@@ -83,7 +82,6 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
     fun fetchFormalOrders() {
         viewModelScope.launch {
             try {
@@ -178,10 +176,6 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) {
                     if (response.success) {
                         Log.d("AuditFlow", "7. ✅ 流程彻底终结")
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            syncMessage = "转正成功，订单已移入正式库"
-                        )
                         fetchIntentOrders()
                         fetchFormalOrders()
                     } else {

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -24,7 +25,6 @@ import com.dee.android.pbl.takechinahome.admin.ui.theme.TakeChinaHomeAdminTheme
 import com.dee.android.pbl.takechinahome.admin.viewmodel.AuditViewModel
 import com.dee.android.pbl.takechinahome.admin.viewmodel.OrderViewModel
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.collectAsState
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,9 +44,10 @@ fun AdminMainContainer() {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("admin_prefs", Context.MODE_PRIVATE) }
 
-    // --- 状态变量 (由 remember 驱动，确保实时刷新) ---
+    // --- 状态持久化与内存同步 ---
     var isLoggedIn by remember { mutableStateOf(prefs.getBoolean("is_logged_in", false)) }
     var currentManagerId by remember { mutableIntStateOf(prefs.getInt("user_id", 0)) }
+    var userEmail by remember { mutableStateOf(prefs.getString("user_email", "") ?: "") }
     var userName by remember { mutableStateOf(prefs.getString("user_name", "员工") ?: "员工") }
     var userRole by remember {
         val savedRole = prefs.getString("user_role", AdminRole.USER.name) ?: AdminRole.USER.name
@@ -61,32 +62,32 @@ fun AdminMainContainer() {
     // ViewModels
     val auditViewModel: AuditViewModel = viewModel()
     val orderViewModel: OrderViewModel = viewModel()
-    val orders by orderViewModel.orders.collectAsState()
     val pendingCount = auditViewModel.uiState.value.allItems.count { it.status == 1 }
 
     // 1. 登录拦截逻辑
     if (!isLoggedIn) {
         AdminLoginScreen(onLoginSuccess = { user ->
-            // ✨ 核心修正：立即同步内存状态
+            // 同步状态
             currentManagerId = user.id
+            userEmail = user.email ?: ""
             userName = user.name
             userRole = user.role
             isLoggedIn = true
 
-            // ✨ 同步持久化存储
+            // 持久化
             prefs.edit().apply {
                 putBoolean("is_logged_in", true)
                 putInt("user_id", user.id)
+                putString("user_email", user.email)
                 putString("user_name", user.name)
                 putString("user_role", user.role.name)
                 apply()
             }
-            android.util.Log.d("ID_CHECK", "登录成功！当前内存 ID: $currentManagerId")
         })
         return
     }
 
-    // 2. 主界面逻辑 (已登录)
+    // 2. 主界面逻辑
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
@@ -163,7 +164,10 @@ fun AdminMainContainer() {
                             when (currentScreen) {
                                 "置换审核" -> auditViewModel.fetchPendingItems()
                                 "产品管理", "用户管理" -> refreshSignal = System.currentTimeMillis()
-                                "订单管理" -> orderViewModel.fetchOrders(currentManagerId)
+                                "订单管理" -> {
+                                    auditViewModel.fetchIntentOrders(currentManagerId)
+                                    auditViewModel.fetchFormalOrders()
+                                }
                                 else -> Toast.makeText(context, "$currentScreen 暂不支持刷新", Toast.LENGTH_SHORT).show()
                             }
                         }) {
@@ -204,35 +208,27 @@ fun AdminMainContainer() {
                     "礼品发布" -> GiftDevScreen(auditViewModel = auditViewModel)
                     "用户管理" -> if (userRole == AdminRole.ADMIN) UserManagerScreen() else PlaceholderScreen("权限不足")
                     "订单管理" -> {
-                        // 自动刷新逻辑
+                        // ✨ 关键修复：确保 LaunchedEffect 依赖于 currentManagerId
+                        // 只有当 ID 不为 0 时才去抓取数据
                         LaunchedEffect(currentManagerId) {
                             if (currentManagerId != 0) {
-                                orderViewModel.fetchOrders(currentManagerId)
+                                auditViewModel.fetchIntentOrders(currentManagerId) // 传入当前经理ID
+                                auditViewModel.fetchFormalOrders()
                             }
                         }
 
                         OrderManagementScreen(
-                            // 1. 数据源拆分：从 auditViewModel 获取两个独立的列表
                             intentOrders = auditViewModel.uiState.value.intentOrders,
                             formalOrders = auditViewModel.uiState.value.formalOrders,
-
                             managerId = currentManagerId,
-
-                            // 2. 刷新逻辑拆分：
-                            // 意向单刷新调用原有的 fetchIntentOrders
-                            onRefreshIntent = { id -> auditViewModel.fetchIntentOrders() },
-                            // 正式单刷新调用新写的 fetchFormalOrders
+                            // ✨ 这里也要同步传入 ID
+                            onRefreshIntent = { id -> auditViewModel.fetchIntentOrders(id) },
                             onRefreshFormal = { auditViewModel.fetchFormalOrders() },
-
-                            // 3. 核心业务逻辑：
                             onConfirmIntent = { orderObject ->
-                                // 触发转正引擎：生成卷宗 -> 上传 -> 迁移数据库
-                                auditViewModel.approveAndConvertOrder(orderObject)
+                                val finalEmail = if (userEmail.isNotEmpty()) userEmail else "admin@ichessgeek.com"
+                                auditViewModel.approveAndConvertOrder(orderObject, finalEmail)
                             },
-
-                            // 4. 完成逻辑：
                             onCompleteOrder = { id ->
-                                // 保持原有的 orderViewModel 处理逻辑
                                 orderViewModel.completeOrder(id, currentManagerId)
                             }
                         )
@@ -244,9 +240,14 @@ fun AdminMainContainer() {
     }
 }
 
+// ✨ 必须包含：占位组件
 @Composable
 fun PlaceholderScreen(name: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-        Text(text = "$name 模块待开发", color = Color.Gray)
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.Build, null, tint = Color.LightGray, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.height(8.dp))
+            Text(text = "$name 模块正在建设中", color = Color.Gray)
+        }
     }
 }

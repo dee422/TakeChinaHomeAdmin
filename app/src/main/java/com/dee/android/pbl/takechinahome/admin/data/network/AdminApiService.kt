@@ -158,4 +158,11 @@ interface AdminApiService {
     // --- E. 订单管理 ---
     @GET("get_formal_orders.php")
     suspend fun getFormalOrders(): ApiResponse<List<Order>>
+
+    @FormUrlEncoded
+    @POST("delete_order_manager.php")
+    suspend fun deleteOrderManager(
+        @Field("id") orderId: Int,
+        @Field("manager_id") managerId: Int
+    ): ApiResponse<Any?>
 }

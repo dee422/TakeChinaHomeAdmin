@@ -31,24 +31,46 @@ import okhttp3.RequestBody.Companion.toRequestBody
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrderManagementScreen(
-    // ✨ 修改：传入两个列表，分别对应两张表
     intentOrders: List<Order>,
     formalOrders: List<Order>,
     managerId: Int,
-    onRefreshIntent: (Int) -> Unit,    // 刷新意向单 (orders表)
-    onRefreshFormal: () -> Unit,      // 刷新正式单 (formal_orders表)
+    onRefreshIntent: (Int) -> Unit,
+    onRefreshFormal: () -> Unit,
     onConfirmIntent: (Order) -> Unit,
     onCompleteOrder: (Int) -> Unit
 ) {
+    // 获取 Context 用于 Toast
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState()
+
     var showChatSheet by remember { mutableStateOf(false) }
     var activeChatOrder by remember { mutableStateOf<Order?>(null) }
-    val sheetState = rememberModalBottomSheetState()
-    val scope = rememberCoroutineScope()
-
+    var orderToDelete by remember { mutableStateOf<Int?>(null) }
     var selectedTabIndex by remember { mutableStateOf(0) }
+
     val tabs = listOf("待处理意向", "正式订单库")
 
-    // ✨ 核心逻辑：根据 Tab 自动触发对应的数据抓取
+    // 1. 删除逻辑封装 (修正变量名与上下文)
+    val performDelete = { id: Int ->
+        scope.launch {
+            try {
+                // 使用正确的参数名 managerId
+                val res = RetrofitClient.adminService.deleteOrderManager(id, managerId)
+                if (res.success) {
+                    Toast.makeText(context, "卷宗已销毁", Toast.LENGTH_SHORT).show()
+                    // 使用正确的刷新回调
+                    onRefreshIntent(managerId)
+                } else {
+                    Toast.makeText(context, "错误: ${res.message}", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "网络异常: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Tab 切换触发刷新
     LaunchedEffect(selectedTabIndex, managerId) {
         if (selectedTabIndex == 0) {
             onRefreshIntent(managerId)
@@ -56,9 +78,6 @@ fun OrderManagementScreen(
             onRefreshFormal()
         }
     }
-
-    // ✨ 根据当前 Tab 选择显示的列表
-    val currentDisplayList = if (selectedTabIndex == 0) intentOrders else formalOrders
 
     Scaffold(
         topBar = {
@@ -84,14 +103,12 @@ fun OrderManagementScreen(
                 }
             }
 
+            val currentDisplayList = if (selectedTabIndex == 0) intentOrders else formalOrders
+
             if (currentDisplayList.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.TaskAlt, // 👈 显式指定参数名
-                            contentDescription = null,           // 👈 显式指定第二个参数名
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(48.dp), tint = Color.LightGray)
                         Spacer(Modifier.height(8.dp))
                         Text("暂无相关卷宗", color = Color.Gray)
                     }
@@ -103,22 +120,53 @@ fun OrderManagementScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(currentDisplayList, key = { it.id }) { order ->
-                        OrderCard(
-                            order = order,
-                            isFormalTab = selectedTabIndex == 1, // 告知卡片当前是否在正式库
-                            onConfirm = { onConfirmIntent(order) },
-                            onComplete = { onCompleteOrder(order.id) },
-                            onChatClick = { selectedOrder ->
-                                activeChatOrder = selectedOrder
-                                showChatSheet = true
-                            }
-                        )
+                        // 根据 Tab 决定渲染哪种卡片
+                        if (selectedTabIndex == 0) {
+                            // 意向单 Tab 使用带删除功能的 IntentOrderCard
+                            IntentOrderCard(
+                                order = order,
+                                onComplete = { onConfirmIntent(it) }, // 跳转生成正式单
+                                onDelete = { orderToDelete = it }
+                            )
+                        } else {
+                            // 正式单 Tab 使用普通 OrderCard
+                            OrderCard(
+                                order = order,
+                                isFormalTab = true,
+                                onConfirm = { },
+                                onComplete = { onCompleteOrder(order.id) },
+                                onChatClick = { /* 正式单通常不进入采集模式 */ }
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // 详情/核对 底部弹窗
+        // --- 对话框组件 ---
+
+        // 1. 确认删除对话框
+        if (orderToDelete != null) {
+            AlertDialog(
+                onDismissRequest = { orderToDelete = null },
+                title = { Text("确认终止") },
+                text = { Text("此操作将永久销毁该意向卷宗，是否继续？") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            performDelete(orderToDelete!!)
+                            orderToDelete = null
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                    ) { Text("确认销毁") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { orderToDelete = null }) { Text("取消") }
+                }
+            )
+        }
+
+        // 2. 意向核对详情 底部弹窗
         if (showChatSheet && activeChatOrder != null) {
             ModalBottomSheet(
                 onDismissRequest = { showChatSheet = false },
@@ -292,6 +340,140 @@ fun OrderCard(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun IntentOrderCard(
+    order: Order,
+    onComplete: (Order) -> Unit,
+    onDelete: (Int) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        elevation = CardDefaults.cardElevation(4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            // --- 头部：订单 ID 与 客户名 ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "意向卷宗 #${order.id}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Gray
+                )
+                Surface(
+                    color = Color(0xFFFFF3E0),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = "客户: ${order.contactName}",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        fontSize = 12.sp,
+                        color = Color(0xFFE65100),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // --- 核心内容：礼品详情 ---
+            Text(
+                text = order.targetGiftName ?: "未知礼品",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            // 展示具体的商品规格/数量（解析自 details JSON）
+            order.details.forEach { item ->
+                Text(
+                    text = "• ${item.name} x ${item.qty} ${item.spec ?: ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.DarkGray,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            // --- AI 客服功能块 (重新找回) ---
+            if (!order.aiSuggestion.isNullOrBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    color = Color(0xFFE3F2FD), // 淡蓝色背景
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = "🤖 AI客服: ",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1976D2)
+                        )
+                        Text(
+                            text = order.aiSuggestion!!,
+                            fontSize = 12.sp,
+                            color = Color(0xFF0D47A1),
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
+            // --- 客户留言/联系方式 ---
+            if (!order.contactMethod.isNullOrBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "📞 联系方式: ${order.contactMethod}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
+            Spacer(Modifier.height(12.dp))
+
+            // --- 操作按键区 ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 1. 终止按键
+                TextButton(
+                    onClick = { onDelete(order.id) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("终止意向")
+                }
+
+                Spacer(Modifier.width(12.dp))
+
+                // 2. 转正按键
+                Button(
+                    onClick = { onComplete(order) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("转为正式卷宗")
                 }
             }
         }
