@@ -1,6 +1,7 @@
 package com.dee.android.pbl.takechinahome.admin.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +19,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dee.android.pbl.takechinahome.admin.data.model.Order
@@ -141,12 +143,14 @@ fun OrderCard(
     onComplete: () -> Unit,
     onChatClick: (Order) -> Unit
 ) {
-    val isCompleted = order.status == "COMPLETED"
+    // 统一处理状态判断（忽略大小写）
+    val isCompleted = order.status.equals("COMPLETED", ignoreCase = true)
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .alpha(if (isCompleted) 0.6f else 1.0f),
+            .padding(vertical = 4.dp, horizontal = 8.dp)
+            .alpha(if (isCompleted && !isFormalTab) 0.6f else 1.0f),
         colors = CardDefaults.cardColors(
             containerColor = if (isFormalTab) Color(0xFFF0F7F0) else MaterialTheme.colorScheme.surface
         ),
@@ -158,15 +162,39 @@ fun OrderCard(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text(
-                        text = if (isFormalTab) "正式单: #${order.id}" else "意向单: #${order.id}",
+                        text = if (isFormalTab) "正式卷宗: #${order.id}" else "采集意向: #${order.id}",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp,
                         color = if (isFormalTab) Color(0xFF2E7D32) else Color.Unspecified
                     )
-                    Text("经理: ${order.managerName ?: "System"}", fontSize = 11.sp, color = Color.Gray)
+                    // 优化：显示真实姓名“斯嘉丽”，增加经办图标
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = Color.Gray
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "负责人: ${order.managerName ?: "系统分配"}",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                    }
                 }
-                Badge(containerColor = getStatusColor(order.status)) {
-                    Text(order.status, color = Color.White, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                Badge(
+                    containerColor = when {
+                        isFormalTab -> Color(0xFF2E7D32)
+                        else -> getStatusColor(order.status)
+                    }
+                ) {
+                    Text(
+                        text = if (isFormalTab) "已归档" else order.status,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        fontSize = 10.sp
+                    )
                 }
             }
 
@@ -179,18 +207,29 @@ fun OrderCard(
                     .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
                     .padding(8.dp)
             ) {
-                Text("联系人: ${order.contactName}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Text("邮箱: ${order.userEmail}", fontSize = 12.sp, color = Color.DarkGray)
+                Text("客户: ${order.contactName}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("联系方式: ${order.contactMethod ?: order.userEmail}", fontSize = 12.sp, color = Color.DarkGray)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
             // 清单展示
             Text("清单明细:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
-            // 如果 formal_orders 结构不同，这里可以做适配
             if (order.details.orEmpty().isEmpty()) {
-                Text("• ${order.targetGiftName ?: "未指定"} x${order.targetQty}", fontSize = 13.sp)
+                // 正式库展示逻辑
+                Column {
+                    Text("• ${order.targetGiftName ?: "未指定礼品"} x${order.targetQty}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    if (isFormalTab && !order.deliveryDate.isNullOrEmpty()) {
+                        Text(
+                            text = "📅 预定交付: ${order.deliveryDate}",
+                            fontSize = 12.sp,
+                            color = Color(0xFFE65100),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
             } else {
+                // 意向单展示逻辑
                 order.details.orEmpty().forEach { item ->
                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
                         Text("• ${item.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
@@ -199,7 +238,7 @@ fun OrderCard(
                 }
             }
 
-            // 意向核对助手 (仅在意向阶段或正式库查看详情时显示)
+            // 意向核对助手 (仅在意向阶段显示)
             if (!isFormalTab) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
@@ -216,8 +255,8 @@ fun OrderCard(
                                 Text("意向核对详情", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                             }
                             Text(
-                                order.aiSuggestion ?: "点击完善采集信息...",
-                                fontSize = 12.sp, maxLines = 1, color = Color.DarkGray
+                                text = order.aiSuggestion ?: "点击完善采集信息...",
+                                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color.DarkGray
                             )
                         }
                         Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
@@ -226,27 +265,31 @@ fun OrderCard(
             }
 
             // 操作按钮
-            if (!isCompleted) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (!isFormalTab) {
-                        // 在意向 Tab 显示转正按钮
-                        Button(
-                            onClick = onConfirm,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("生成正式卷宗")
-                        }
-                    } else {
-                        // 在正式库显示交付按钮
-                        OutlinedButton(
-                            onClick = onComplete,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("完成交付")
+            if (!isCompleted || isFormalTab) {
+                // 注意：正式库即使状态是 Completed 也可以显示“完成交付”来做最终结单，或者不显示
+                val showButton = if (isFormalTab) order.status != "Delivered" else !isCompleted
+
+                if (showButton) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        if (!isFormalTab) {
+                            Button(
+                                onClick = onConfirm,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("生成正式卷宗")
+                            }
+                        } else if (order.status != "Delivered") {
+                            OutlinedButton(
+                                onClick = onComplete,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFF2E7D32))
+                            ) {
+                                Text("完成最终交付", color = Color(0xFF2E7D32))
+                            }
                         }
                     }
                 }
