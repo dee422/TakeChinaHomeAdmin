@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.sp
 import com.dee.android.pbl.takechinahome.admin.data.model.Order
 import com.dee.android.pbl.takechinahome.admin.data.network.RetrofitClient
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,7 +32,8 @@ fun OrderManagementScreen(
     orders: List<Order>,
     managerId: Int,
     onRefresh: (Int) -> Unit,
-    onConfirmIntent: (Int) -> Unit,
+    // ✨ 关键修改：参数由 Int 改为 Order，变量名保持不变
+    onConfirmIntent: (Order) -> Unit,
     onCompleteOrder: (Int) -> Unit
 ) {
     var showChatSheet by remember { mutableStateOf(false) }
@@ -77,7 +80,8 @@ fun OrderManagementScreen(
                     items(filteredOrders) { order ->
                         OrderCard(
                             order = order,
-                            onConfirm = { onConfirmIntent(order.id) },
+                            // ✨ 关键修改：直接传递整个 order 对象
+                            onConfirm = { onConfirmIntent(order) },
                             onComplete = { onCompleteOrder(order.id) },
                             onChatClick = { selectedOrder ->
                                 activeChatOrder = selectedOrder
@@ -200,6 +204,7 @@ fun OrderCard(
     }
 }
 
+// ... 剩余代码（ChatBottomSheetContent 等）保持不变 ...
 @Composable
 fun ChatBottomSheetContent(
     order: Order,
@@ -209,19 +214,16 @@ fun ChatBottomSheetContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // ✨ 修正逻辑：从原始 details 获取 name 和 qty 的参考值
     val refItem = order.details.firstOrNull()
     val refName = refItem?.name ?: ""
     val refQty = refItem?.qty ?: 0
 
-    // 1. 本地编辑状态：若 target 字段为默认值，则自动填充 ref 参考值
     var giftName by remember {
         mutableStateOf(if (order.targetGiftName == "待定" || order.targetGiftName.isNullOrEmpty()) refName else order.targetGiftName)
     }
     var qty by remember {
         mutableStateOf(if (order.targetQty == 0) refQty.toString() else order.targetQty.toString())
     }
-    // ✨ 核心修正：交货时间不再看 spec，由经理手动输入或 AI 提醒补全
     var date by remember { mutableStateOf(order.deliveryDate ?: "待定") }
     var contact by remember { mutableStateOf(order.contactMethod ?: "待定") }
 
@@ -269,7 +271,6 @@ fun ChatBottomSheetContent(
 
         Spacer(Modifier.height(16.dp))
 
-        // 结构化输入框组
         IntentField("意向礼品名称", giftName, isLocked) { giftName = it }
         IntentField("意向数量", qty, isLocked) { qty = it }
         IntentField("期望交货时间", date, isLocked) { date = it }
@@ -282,20 +283,35 @@ fun ChatBottomSheetContent(
                 scope.launch {
                     isSaving = true
                     try {
+                        // ✨ 核心修正：将原始数据包装为 RequestBody
+                        val textType = "text/plain".toMediaTypeOrNull()
+
+                        val orderIdPart = order.id.toString().toRequestBody(textType)
+                        val giftNamePart = giftName.toRequestBody(textType)
+                        val qtyPart = qty.toRequestBody(textType)
+                        val datePart = date.toRequestBody(textType)
+                        val contactPart = contact.toRequestBody(textType)
+                        val statusPart = "1".toRequestBody(textType)
+
+                        // 调用接口，注意：最后一个参数 formalImage 传 null
+                        // 因为在这个弹窗里我们只是锁定文字信息，不触发截图上传
                         val res = RetrofitClient.adminService.updateOrderIntent(
-                            orderId = order.id,
-                            giftName = giftName,
-                            qty = qty.toIntOrNull() ?: 0,
-                            date = date,
-                            contact = contact,
-                            status = 1
+                            orderId = orderIdPart,
+                            giftName = giftNamePart,
+                            qty = qtyPart,
+                            date = datePart,
+                            contact = contactPart,
+                            status = statusPart,
+                            formalImage = null
                         )
+
                         if (res.success) {
                             Toast.makeText(context, "意向单已生成并锁定", Toast.LENGTH_SHORT).show()
                             onDataChanged()
                             onDismiss()
                         }
                     } catch (e: Exception) {
+                        android.util.Log.e("AuditFlow", "Save Error: ${e.message}")
                         Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
                     } finally {
                         isSaving = false

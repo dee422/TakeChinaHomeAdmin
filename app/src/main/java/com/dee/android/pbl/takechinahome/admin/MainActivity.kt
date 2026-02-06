@@ -215,7 +215,11 @@ fun AdminMainContainer() {
                             orders = orders,
                             managerId = currentManagerId, // ✨ 补全缺失参数
                             onRefresh = { id -> orderViewModel.fetchOrders(id) }, // ✨ 补全缺失参数
-                            onConfirmIntent = { id -> orderViewModel.confirmIntent(id, currentManagerId) },
+                            // ✨ 核心修正：将确认逻辑从简单的状态修改，改为触发“转正引擎”
+                            onConfirmIntent = { orderObject ->
+                                // 既然拿到了整个对象，直接塞进引擎
+                                auditViewModel.approveAndConvertOrder(orderObject)
+                            },
                             onCompleteOrder = { id -> orderViewModel.completeOrder(id, currentManagerId) }
                         )
                     }

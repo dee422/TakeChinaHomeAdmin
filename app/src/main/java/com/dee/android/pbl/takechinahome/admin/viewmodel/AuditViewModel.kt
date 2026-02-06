@@ -5,21 +5,22 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.dee.android.pbl.takechinahome.admin.data.db.AppDatabase // 确保导入你的数据库类
+import com.dee.android.pbl.takechinahome.admin.data.db.AppDatabase
 import com.dee.android.pbl.takechinahome.admin.data.model.ExchangeGift
 import com.dee.android.pbl.takechinahome.admin.data.model.Order
-import com.dee.android.pbl.takechinahome.admin.data.model.PendingTask // 确保导入实体类
 import com.dee.android.pbl.takechinahome.admin.data.network.RetrofitClient
 import com.dee.android.pbl.takechinahome.admin.ui.util.ScrollGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 
-// 1. 定义筛选模式
 enum class FilterMode { ALL, PENDING, APPROVED, REJECTED }
 
-// 2. 完善 UI 状态类
 data class AuditUiState(
     val isLoading: Boolean = false,
     val allItems: List<ExchangeGift> = emptyList(),
@@ -35,9 +36,7 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = mutableStateOf(AuditUiState())
     val uiState: State<AuditUiState> = _uiState
 
-    // ✨ 只有这里增加了数据库相关的初始化，其他逻辑不动
     private val db = AppDatabase.getInstance(application)
-    private val taskDao = db.pendingTaskDao()
     private val scrollGenerator = ScrollGenerator(application)
 
     init {
@@ -53,7 +52,7 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             try {
-                val response = RetrofitClient.instance.getPendingItems()
+                val response = RetrofitClient.adminService.getPendingItems()
                 if (response.success) {
                     val fetchedData = response.data ?: emptyList()
                     _uiState.value = _uiState.value.copy(
@@ -61,17 +60,9 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                         pendingItems = applyFilter(fetchedData, _uiState.value.filterMode),
                         isLoading = false
                     )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        errorMessage = response.message ?: "获取数据失败",
-                        isLoading = false
-                    )
                 }
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    errorMessage = "网络连接异常: ${e.localizedMessage}",
-                    isLoading = false
-                )
+                _uiState.value = _uiState.value.copy(errorMessage = "加载失败: ${e.message}", isLoading = false)
             }
         }
     }
@@ -79,66 +70,94 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
     fun fetchIntentOrders() {
         viewModelScope.launch {
             try {
-                val currentManagerId = 0 // 改为 0 配合你的 PHP 逻辑获取全量
-                val response = RetrofitClient.instance.getIntentOrders(currentManagerId)
+                // 传入 0 以获取全量意向订单
+                val response = RetrofitClient.adminService.getIntentOrders(0)
                 if (response.success) {
                     _uiState.value = _uiState.value.copy(intentOrders = response.data ?: emptyList())
                 }
             } catch (e: Exception) {
-                android.util.Log.e("Audit", "获取意向订单失败", e)
+                android.util.Log.e("AuditFlow", "获取意向订单列表失败", e)
             }
         }
     }
 
     fun approveAndConvertOrder(order: Order) {
-        _uiState.value = _uiState.value.copy(isLoading = true)
-        viewModelScope.launch(Dispatchers.Main) {
+        android.util.Log.d("AuditFlow", "1. 触发转正流程: OrderID=${order.id}")
+        _uiState.value = _uiState.value.copy(isLoading = true, syncMessage = "正在生成正式卷宗...", errorMessage = null)
+
+        viewModelScope.launch {
             try {
                 scrollGenerator.generateFormalScroll(order) { imageFile ->
-                    handleGeneratedScroll(order.id, imageFile)
+                    android.util.Log.d("AuditFlow", "3. 卷宗生成成功，准备上传: ${imageFile.absolutePath}")
+                    handleGeneratedScroll(order, imageFile)
                 }
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "生成卷宗失败: ${e.localizedMessage}"
-                )
+                android.util.Log.e("AuditFlow", "截图生成失败: ${e.message}")
+                _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "截图失败: ${e.message}")
             }
         }
     }
 
-    private fun handleGeneratedScroll(orderId: Int, file: File) {
-        // ✨ 将原本的 TODO 替换为真正的 IO 写入逻辑
+    private fun handleGeneratedScroll(order: Order, file: File) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 1. 存入 Room 数据库
-                val task = PendingTask(
-                    orderId = orderId,
-                    localImagePath = file.absolutePath
+                // 1. 准备 Multipart 图片
+                val fileRequestBody = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                val formalImagePart = MultipartBody.Part.createFormData(
+                    "formal_image",
+                    file.name,
+                    fileRequestBody
                 )
-                taskDao.insertTask(task)
 
-                // 2. 切回主线程更新 UI
+                // 2. 准备 RequestBody (对应 AdminApiService 定义)
+                val textType = "text/plain".toMediaTypeOrNull()
+                val orderIdBody = order.id.toString().toRequestBody(textType)
+                val giftNameBody = (order.targetGiftName ?: "正式卷宗").toRequestBody(textType)
+                val qtyBody = order.targetQty.toString().toRequestBody(textType)
+                val dateBody = (order.deliveryDate ?: "待定").toRequestBody(textType)
+                val contactBody = (order.contactMethod ?: "System").toRequestBody(textType)
+                val statusBody = "1".toRequestBody(textType)
+
+                android.util.Log.d("AuditFlow", "4. 开始同步到云端: ${order.id}")
+
+                // 3. 执行请求 (这里使用的是 AdminApiService.kt 中的 updateOrderIntent)
+                val response = RetrofitClient.adminService.updateOrderIntent(
+                    orderId = orderIdBody,
+                    giftName = giftNameBody,
+                    qty = qtyBody,
+                    date = dateBody,
+                    contact = contactBody,
+                    status = statusBody,
+                    formalImage = formalImagePart
+                )
+
                 withContext(Dispatchers.Main) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        syncMessage = "卷宗已生成并存入离线队列"
-                    )
+                    if (response.success) {
+                        android.util.Log.d("AuditFlow", "5. ✅ 同步成功: ${response.message}")
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            syncMessage = "转正成功！卷宗已存入 formal_orders"
+                        )
+                        fetchIntentOrders() // 刷新列表
+                    } else {
+                        android.util.Log.e("AuditFlow", "5. ❌ 同步被拒绝: ${response.message}")
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            errorMessage = "同步失败: ${response.message}"
+                        )
+                    }
                 }
             } catch (e: Exception) {
+                // 如果 PHP 报错（500）或网络断开，会进到这里
+                android.util.Log.e("AuditFlow", "5. ❌ 网络层异常: ${e.message}")
+                e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        errorMessage = "存入数据库失败: ${e.localizedMessage}"
+                        errorMessage = "网络连接异常，请检查服务器日志"
                     )
                 }
             }
-        }
-
-        // 保留你的测试日志
-        if (file.exists() && file.length() > 0) {
-            android.util.Log.d("SUCCESS", "卷宗生成成功！路径: ${file.absolutePath} 大小: ${file.length()} bytes")
-        } else {
-            android.util.Log.e("ERROR", "图片生成失败或为空文件")
         }
     }
 
@@ -162,14 +181,10 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val newStatus = if (approve) 2 else 3
             try {
-                val response = RetrofitClient.instance.auditItem(id, newStatus)
-                if (response.success) {
-                    fetchPendingItems()
-                } else {
-                    _uiState.value = _uiState.value.copy(errorMessage = "操作失败: ${response.message}")
-                }
+                val response = RetrofitClient.adminService.auditItem(id, newStatus)
+                if (response.success) fetchPendingItems()
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(errorMessage = "提交审核出错: ${e.localizedMessage}")
+                _uiState.value = _uiState.value.copy(errorMessage = "操作失败: ${e.localizedMessage}")
             }
         }
     }

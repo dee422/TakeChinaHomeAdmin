@@ -3,6 +3,8 @@ package com.dee.android.pbl.takechinahome.admin.data.network
 import com.dee.android.pbl.takechinahome.admin.data.model.*
 import com.dee.android.pbl.takechinahome.admin.ui.screens.AdminGift
 import com.google.gson.annotations.SerializedName
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import retrofit2.http.*
 
 // --- 保留原有模型，绝对不改名 ---
@@ -133,14 +135,15 @@ interface AdminApiService {
     suspend fun getAiSuggestion(@Query("order_id") orderId: Int): ApiResponse<String>
 
     // ✨ 专门为解决 OrderManagementScreen 报错新增的方法
-    @FormUrlEncoded
+    @Multipart
     @POST("update_order_intent.php")
     suspend fun updateOrderIntent(
-        @Field("order_id") orderId: Int,
-        @Field("target_gift_name") giftName: String,
-        @Field("target_qty") qty: Int,
-        @Field("delivery_date") date: String,
-        @Field("contact_method") contact: String,
-        @Field("intent_confirm_status") status: Int
+        @Part("order_id") orderId: RequestBody,
+        @Part("target_gift_name") giftName: RequestBody,
+        @Part("target_qty") qty: RequestBody,
+        @Part("delivery_date") date: RequestBody,
+        @Part("contact_method") contact: RequestBody,
+        @Part("intent_confirm_status") status: RequestBody,
+        @Part formalImage: MultipartBody.Part?
     ): ApiResponse<Any?>
 }

@@ -3,79 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <style>
-        body {
-            margin: 0; padding: 0;
-            background-color: #f4f1ea; /* 宣纸色 */
-            display: flex; justify-content: center;
-        }
-        #scroll-container {
-            width: 400px; /* 宽度固定，方便截图 */
-            padding: 40px;
-            border: 15px solid #8d704c; /* 深木色边框 */
-            background: #fdfaf5;
-            box-shadow: inset 0 0 50px rgba(0,0,0,0.05);
-            font-family: "Noto Serif SC", "SimSun", serif;
-            position: relative;
-        }
-        .header {
-            text-align: center;
-            border-bottom: 2px solid #8d704c;
-            margin-bottom: 30px;
-            padding-bottom: 10px;
-        }
-        .title { font-size: 28px; color: #333; letter-spacing: 4px; }
-        .content { font-size: 18px; line-height: 2; color: #444; }
-        .label { color: #888; font-size: 14px; margin-right: 10px; }
-        .footer {
-            margin-top: 60px;
-            text-align: right;
-            border-top: 1px dashed #ccc;
-            padding-top: 20px;
-        }
-        .signature { font-size: 20px; font-weight: bold; color: #222; }
-        .stamp {
-            display: inline-block;
-            width: 60px; height: 60px;
-            border: 2px solid #b22222;
-            color: #b22222;
-            text-align: center;
-            line-height: 60px;
-            border-radius: 50%;
-            transform: rotate(-15.deg);
-            margin-left: 10px;
-            font-size: 12px;
-        }
+        body { font-family: sans-serif; padding: 20px; color: #333; }
+        .header { text-align: center; border-bottom: 2px solid #2E7D32; padding-bottom: 10px; }
+        .content { margin-top: 20px; line-height: 1.6; }
+        .field { margin-bottom: 10px; }
+        .label { font-weight: bold; color: #666; }
     </style>
 </head>
 <body>
-<div id="scroll-container">
-    <div class="header">
-        <div class="title">岁时礼序 · 正式卷宗</div>
-    </div>
-    <div class="content">
-        <p><span class="label">卷宗编号</span> <span id="order_id">#8888</span></p>
-        <p><span class="label">雅鉴礼品</span> <b id="gift_name">载入中...</b></p>
-        <p><span class="label">拟订数量</span> <span id="qty">0</span> 件</p>
-        <p><span class="label">期望交期</span> <span id="date">待定</span></p>
-        <p><span class="label">客户雅号</span> <span id="customer">待定</span></p>
-    </div>
-    <div class="footer">
-        <p>客户经理：<span class="signature" id="manager_name">签字中</span></p>
-        <div class="stamp">岁时确认</div>
-        <p style="font-size: 10px; color: #999;">生成时间：<span id="timestamp"></span></p>
-    </div>
+<div class="header">
+    <h1>雅鉴·正式卷宗</h1>
+    <p>订单编号：<span id="orderId">--</span></p>
+</div>
+<div class="content">
+    <div class="field"><span class="label">意向礼品：</span><span id="giftName">--</span></div>
+    <div class="field"><span class="label">订购数量：</span><span id="qty">--</span></div>
+    <div class="field"><span class="label">交付日期：</span><span id="date">--</span></div>
+    <div class="field"><span class="label">联系方式：</span><span id="contact">--</span></div>
+    <div class="field"><span class="label">经办人：</span><span id="manager">--</span></div>
 </div>
 
 <script>
-    // 提供给 Android 调用注入数据的接口
-    fun setData(orderId, gift, qty, date, customer, manager) {
-        document.getElementById('order_id').innerText = '#' + orderId;
-        document.getElementById('gift_name').innerText = gift;
-        document.getElementById('qty').innerText = qty;
-        document.getElementById('date').innerText = date;
-        document.getElementById('customer').innerText = customer;
-        document.getElementById('manager_name').innerText = manager;
-        document.getElementById('timestamp').innerText = new Date().toLocaleString();
+    // ✨ 确保函数定义完全正确，不要在参数或逻辑里加多余的符号
+    function setData(orderId, gift, qty, date, contact, manager) {
+        try {
+            document.getElementById('orderId').innerText = orderId;
+            document.getElementById('giftName').innerText = gift;
+            document.getElementById('qty').innerText = qty;
+            document.getElementById('date').innerText = date;
+            document.getElementById('contact').innerText = contact;
+            document.getElementById('manager').innerText = manager;
+
+            // 通知 Android 渲染完成了（如果你的 ScrollGenerator 监听了 console）
+            console.log("RENDER_COMPLETE");
+        } catch (e) {
+            console.error("JS_ERROR: " + e.message);
+        }
     }
 </script>
 </body>
