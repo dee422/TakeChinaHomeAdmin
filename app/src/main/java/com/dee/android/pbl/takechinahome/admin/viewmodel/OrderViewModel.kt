@@ -40,12 +40,37 @@ class OrderViewModel : ViewModel() {
 
     // 转正订单
     fun confirmIntent(orderId: Int, managerId: Int) {
-        updateOrder(orderId, "PENDING", 0, managerId)
+        viewModelScope.launch {
+            try {
+                // 1. 发送转正请求
+                val response = RetrofitClient.adminService.convertToFormal(orderId, managerId)
+
+                // 💡 关键：无论成功失败，都打个 Log 看看
+                android.util.Log.d("OrderDebug", "转正请求结果: ${response.success}, 消息: ${response.message}")
+
+                if (response.success) {
+                    // 2. 只有成功了才刷新
+                    fetchOrders(managerId)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("OrderDebug", "网络请求崩溃: ${e.message}")
+            }
+        }
     }
 
     // 完成订单
     fun completeOrder(orderId: Int, managerId: Int) {
-        updateOrder(orderId, "COMPLETED", 0, managerId)
+        viewModelScope.launch {
+            try {
+                // 只有这里才应该发送 "Completed"
+                val response = RetrofitClient.adminService.updateOrderStatus(orderId, "Completed", 0)
+                if (response.success) {
+                    fetchOrders(managerId)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("OrderDebug", "交付请求失败: ${e.message}")
+            }
+        }
     }
 
     private fun updateOrder(orderId: Int, status: String, isIntent: Int, managerId: Int) {

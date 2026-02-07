@@ -7,7 +7,6 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.http.*
 
-// --- 保留原有模型，绝对不改名 ---
 data class AiRefineResult(
     val success: Boolean,
     @SerializedName("refined_text") val refinedText: String?,
@@ -68,7 +67,7 @@ interface AdminApiService {
     @POST("delete_gift_admin.php")
     suspend fun deleteGift(@Field("id") id: Int): ApiResponse<Any?>
 
-    // --- C. AI 辅助功能 (严禁改动此处，修复 GiftDevScreen 报错) ---
+    // --- C. AI 辅助功能 ---
     @FormUrlEncoded
     @POST("ai_proxy.php")
     suspend fun refineText(
@@ -92,7 +91,7 @@ interface AdminApiService {
     suspend fun generateMarketingCopy(
         @Field("provider") provider: String,
         @Field("api_key") apiKey: String,
-        @Field("text") text: String, // 保持变量名为 text
+        @Field("text") text: String,
         @Field("samples") samples: String = ""
     ): TextResponse
 
@@ -117,11 +116,18 @@ interface AdminApiService {
     @GET("get_admin_users.php")
     suspend fun getAdminUsers(): ApiResponse<List<AdminUser>>
 
-    // --- E. 订单管理 (新增功能区) ---
+    // --- E. 订单管理 ---
     @GET("get_intent_orders.php")
     suspend fun getIntentOrders(
         @Query("manager_id") managerId: Int
     ): ApiResponse<List<Order>>
+
+    @FormUrlEncoded
+    @POST("convert_to_formal.php")
+    suspend fun convertToFormal(
+        @Field("order_id") orderId: Int,
+        @Field("manager_id") managerId: Int
+    ): ApiResponse<Any?>
 
     @FormUrlEncoded
     @POST("update_order_status.php")
@@ -134,11 +140,13 @@ interface AdminApiService {
     @GET("get_ai_suggestion.php")
     suspend fun getAiSuggestion(@Query("order_id") orderId: Int): ApiResponse<String>
 
-    // ✨ 专门为解决 OrderManagementScreen 报错新增的方法
+    // ✨ 订单采集更新接口：变量名使用驼峰(managerId)，注解使用下划线("manager_id")
     @Multipart
     @POST("update_order_intent.php")
     suspend fun updateOrderIntent(
         @Part("order_id") orderId: RequestBody,
+        @Part("manager_id") managerId: RequestBody,
+        @Part("manager_name") managerName: RequestBody,
         @Part("target_gift_name") giftName: RequestBody,
         @Part("target_qty") qty: RequestBody,
         @Part("delivery_date") date: RequestBody,
@@ -153,9 +161,8 @@ interface AdminApiService {
         @Field("order_id") orderId: Int,
         @Field("local_path") localPath: String,
         @Field("manager_email") managerEmail: String
-    ): ApiResponse<Any?> // 假设你已有通用的响应模型
+    ): ApiResponse<Any?>
 
-    // --- E. 订单管理 ---
     @GET("get_formal_orders.php")
     suspend fun getFormalOrders(): ApiResponse<List<Order>>
 

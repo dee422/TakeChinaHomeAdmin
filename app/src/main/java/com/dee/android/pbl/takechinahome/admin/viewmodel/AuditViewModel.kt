@@ -34,6 +34,8 @@ data class AuditUiState(
 )
 
 class AuditViewModel(application: Application) : AndroidViewModel(application) {
+    // ✨ 保存当前的经理ID，防止刷新时丢失上下文
+    private var currentManagerId: Int = 0
 
     private val _uiState = mutableStateOf(AuditUiState())
     val uiState: State<AuditUiState> = _uiState
@@ -42,12 +44,15 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
     private val scrollGenerator = ScrollGenerator(application)
 
     init {
-        refreshAll()
+        // 初始化时暂时使用 ID 1 预加载，后期建议由 UI 层调用 refreshAll(id)
+        refreshAll(1)
     }
 
-    fun refreshAll() {
+    // ✨ 核心修正：带参数的刷新，并更新成员变量
+    fun refreshAll(managerId: Int) {
+        this.currentManagerId = managerId
         fetchPendingItems()
-        fetchIntentOrders()
+        fetchIntentOrders(managerId)
         fetchFormalOrders()
     }
 
@@ -70,18 +75,23 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun fetchIntentOrders(managerId: Int = 0) {
+    fun fetchIntentOrders(managerId: Int) {
+        if (managerId <= 0) return
         viewModelScope.launch {
             try {
                 val response = RetrofitClient.adminService.getIntentOrders(managerId)
                 if (response.success) {
-                    _uiState.value = _uiState.value.copy(intentOrders = response.data ?: emptyList())
+                    _uiState.value = _uiState.value.copy(
+                        intentOrders = response.data ?: emptyList()
+                    )
+                    Log.d("AuditFlow", "意向订单刷新成功，数量: ${response.data?.size}")
                 }
             } catch (e: Exception) {
-                Log.e("AuditFlow", "获取意向订单列表失败", e)
+                Log.e("AuditFlow", "失败: ${e.message}")
             }
         }
     }
+
     fun fetchFormalOrders() {
         viewModelScope.launch {
             try {
@@ -96,20 +106,16 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ✨ 修正：增加 managerEmail 参数，默认值设为斯嘉丽的邮箱
     fun approveAndConvertOrder(order: Order, managerEmail: String = "admin@ichessgeek.com") {
-        Log.d("AuditFlow", "1. 触发转正流程: OrderID=${order.id}, 操作人: $managerEmail")
-        _uiState.value = _uiState.value.copy(isLoading = true, syncMessage = "正在生成正式卷宗...", errorMessage = null)
+        Log.d("AuditFlow", "1. 触发转正流程: OrderID=${order.id}")
+        _uiState.value = _uiState.value.copy(isLoading = true, syncMessage = "正在生成正式卷宗...")
 
         viewModelScope.launch {
             try {
                 scrollGenerator.generateFormalScroll(order) { imageFile ->
-                    Log.d("AuditFlow", "3. 卷宗生成成功，准备上传: ${imageFile.absolutePath}")
-                    // 将 email 传给下一步
                     handleGeneratedScroll(order, imageFile, managerEmail)
                 }
             } catch (e: Exception) {
-                Log.e("AuditFlow", "截图生成失败: ${e.message}")
                 _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "截图失败: ${e.message}")
             }
         }
@@ -126,28 +132,24 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 val textType = "text/plain".toMediaTypeOrNull()
-                val orderIdBody = order.id.toString().toRequestBody(textType)
-                val giftNameBody = (order.targetGiftName ?: "正式卷宗").toRequestBody(textType)
-                val qtyBody = order.targetQty.toString().toRequestBody(textType)
-                val dateBody = (order.deliveryDate ?: "待定").toRequestBody(textType)
-                val contactBody = (order.contactMethod ?: "System").toRequestBody(textType)
-                val statusBody = "1".toRequestBody(textType)
 
-                Log.d("AuditFlow", "4. 开始同步到云端: ${order.id}")
-
+                // 🚩 这里的 managerIdBody 使用了保存的 currentManagerId
                 val response = RetrofitClient.adminService.updateOrderIntent(
-                    orderId = orderIdBody,
-                    giftName = giftNameBody,
-                    qty = qtyBody,
-                    date = dateBody,
-                    contact = contactBody,
-                    status = statusBody,
+                    orderId = order.id.toString().toRequestBody(textType),
+                    managerId = currentManagerId.toString().toRequestBody(textType),
+                    managerName = "斯嘉丽".toRequestBody(textType),
+                    // 确保不要回传硬编码的 "正式卷宗"，除非真的没名字
+                    giftName = (order.targetGiftName ?: "未命名礼品").toRequestBody(textType),
+                    qty = order.targetQty.toString().toRequestBody(textType),
+                    date = (order.deliveryDate ?: "无日期").toRequestBody(textType),
+                    contact = (order.contactMethod ?: "无联系方式").toRequestBody(textType),
+                    status = "1".toRequestBody(textType), // 状态 1 代表确认为正式
                     formalImage = formalImagePart
                 )
 
+                Log.d("AuditFlow", "上传响应: ${response.success}, 消息: ${response.message}")
+
                 if (response.success) {
-                    Log.d("AuditFlow", "5. ✅ 图片同步成功")
-                    // 将 email 传给收尾事务
                     finalizeTransaction(order, file.absolutePath, managerEmail)
                 } else {
                     withContext(Dispatchers.Main) {
@@ -155,8 +157,9 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
+                Log.e("AuditFlow", "handleGeneratedScroll 崩溃", e)
                 withContext(Dispatchers.Main) {
-                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "网络连接异常")
+                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "网络异常")
                 }
             }
         }
@@ -165,29 +168,24 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
     private fun finalizeTransaction(order: Order, localPath: String, managerEmail: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                Log.d("AuditFlow", "6. 发送收尾请求: ID=${order.id}, 使用邮箱: $managerEmail")
-
                 val response = RetrofitClient.adminService.finalizeOrder(
                     orderId = order.id,
                     localPath = localPath,
-                    managerEmail = managerEmail // ✨ 彻底修复：这里不再使用 SystemAdmin
+                    managerEmail = managerEmail
                 )
 
                 withContext(Dispatchers.Main) {
                     if (response.success) {
-                        Log.d("AuditFlow", "7. ✅ 流程彻底终结")
-                        fetchIntentOrders()
-                        fetchFormalOrders()
+                        _uiState.value = _uiState.value.copy(isLoading = false, syncMessage = "转正完成")
+                        // ✨ 修正：传入保存好的 currentManagerId 刷新列表
+                        refreshAll(currentManagerId)
                     } else {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            errorMessage = "收尾失败: ${response.message}"
-                        )
+                        _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "收尾失败")
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "异常: ${e.message}")
+                    _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "系统错误")
                 }
             }
         }
@@ -216,7 +214,7 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                 val response = RetrofitClient.adminService.auditItem(id, newStatus)
                 if (response.success) fetchPendingItems()
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(errorMessage = "操作失败: ${e.localizedMessage}")
+                _uiState.value = _uiState.value.copy(errorMessage = "操作失败")
             }
         }
     }

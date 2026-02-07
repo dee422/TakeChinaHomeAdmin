@@ -208,29 +208,33 @@ fun AdminMainContainer() {
                     "产品管理" -> ProductListScreen(refreshSignal = refreshSignal)
                     "礼品发布" -> GiftDevScreen(auditViewModel = auditViewModel)
                     "用户管理" -> if (userRole == AdminRole.ADMIN) UserManagerScreen() else PlaceholderScreen("权限不足")
+                    // ... 前面 import 保持不变
+
                     "订单管理" -> {
-                        // ✨ 关键修复：确保 LaunchedEffect 依赖于 currentManagerId
-                        // 只有当 ID 不为 0 时才去抓取数据
+                        // 自动刷新数据
+                        val auditUiState by auditViewModel.uiState
                         LaunchedEffect(currentManagerId) {
                             if (currentManagerId != 0) {
-                                auditViewModel.fetchIntentOrders(currentManagerId) // 传入当前经理ID
-                                auditViewModel.fetchFormalOrders()
+                                auditViewModel.refreshAll(currentManagerId)
                             }
                         }
 
                         OrderManagementScreen(
-                            intentOrders = auditViewModel.uiState.value.intentOrders,
-                            formalOrders = auditViewModel.uiState.value.formalOrders,
+                            // 1. 严格分离意向和正式单
+                            intentOrders = auditUiState.intentOrders,
+                            formalOrders = auditUiState.formalOrders,
                             managerId = currentManagerId,
-                            // ✨ 这里也要同步传入 ID
                             onRefreshIntent = { id -> auditViewModel.fetchIntentOrders(id) },
                             onRefreshFormal = { auditViewModel.fetchFormalOrders() },
+
+                            // 🚀 修正点：这里的 Lambda 必须能接收 Order 对象并触发 ViewModel
                             onConfirmIntent = { orderObject ->
-                                val finalEmail = if (userEmail.isNotEmpty()) userEmail else "admin@ichessgeek.com"
-                                auditViewModel.approveAndConvertOrder(orderObject, finalEmail)
+                                auditViewModel.approveAndConvertOrder(orderObject, userEmail)
                             },
+
+                            // 🚀 交付逻辑
                             onCompleteOrder = { id ->
-                                orderViewModel.completeOrder(id, currentManagerId)
+                                // auditViewModel.completeOrder(id)
                             }
                         )
                     }

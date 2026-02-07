@@ -1,5 +1,6 @@
 package com.dee.android.pbl.takechinahome.admin.ui.screens
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -19,7 +20,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dee.android.pbl.takechinahome.admin.data.model.Order
@@ -41,21 +41,16 @@ fun OrderManagementScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val sheetState = rememberModalBottomSheetState()
 
-    // --- 状态变量 (严禁改名) ---
     var showChatSheet by remember { mutableStateOf(false) }
     var activeChatOrder by remember { mutableStateOf<Order?>(null) }
-    var orderToDelete by remember { mutableStateOf<Order?>(null) } // 改为存储 Order 对象，方便取 ID 和名字
+    var orderToDelete by remember { mutableStateOf<Order?>(null) }
     var orderToConfirm by remember { mutableStateOf<Order?>(null) }
     var isSynchronizing by remember { mutableStateOf(false) }
 
-    var selectedTabIndex by remember { mutableStateOf(0) }
+    var selectedTabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("待处理意向", "正式订单库")
 
-    // --- 逻辑函数 ---
-
-    // 删除执行
     val performDelete = { order: Order ->
         scope.launch {
             try {
@@ -72,150 +67,110 @@ fun OrderManagementScreen(
         }
     }
 
-    // 转正执行
     val performConfirm = { order: Order ->
+        Log.d("AuditFlow", "点击了确认转正按钮，OrderID: ${order.id}") // 添加这行
         scope.launch {
             try {
                 isSynchronizing = true
-                onConfirmIntent(order) // 调用 ViewModel 的 approveAndConvertOrder
-
-                // 给后端一点处理时间，然后强制刷新双表
-                kotlinx.coroutines.delay(1200)
+                onConfirmIntent(order)
+                kotlinx.coroutines.delay(1500)
                 onRefreshIntent(managerId)
                 onRefreshFormal()
-
                 isSynchronizing = false
-                Toast.makeText(context, "转正指令已执行", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "转正成功，请查看正式库", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
+                Log.e("AuditFlow", "转正过程崩溃", e) // 添加这行
                 isSynchronizing = false
                 Toast.makeText(context, "同步异常", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    // 布局根容器
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-
-            // 1. 同步提示条 (位于 TabRow 上方)
+            // 临时调试：看看列表里到底有没有东西
+            val currentDisplayList = if (selectedTabIndex == 0) intentOrders else formalOrders
+            Text("调试：当前列表长度 = ${currentDisplayList.size}", color = Color.Red)
             if (isSynchronizing) {
-                Surface(
-                    color = Color(0xFFFFF3E0),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFFE65100))
-                        Spacer(Modifier.width(12.dp))
-                        Text("正在同步数据，请耐心等待...", fontSize = 12.sp, color = Color(0xFFE65100))
-                    }
-                }
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Color(0xFFE65100))
             }
 
-            // 2. Tab 切换
             TabRow(selectedTabIndex = selectedTabIndex) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
-                        text = { Text(title, fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Normal) }
+                        text = { Text(title) }
                     )
                 }
             }
 
-            // 3. 列表内容
-            val currentDisplayList = if (selectedTabIndex == 0) intentOrders else formalOrders
-
-            if (currentDisplayList.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无相关卷宗", color = Color.Gray)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(currentDisplayList, key = { it.id }) { order ->
-                        if (selectedTabIndex == 0) {
-                            IntentOrderCard(
-                                order = order,
-                                onComplete = { orderToConfirm = it }, // 触发确认弹窗
-                                onDelete = { orderToDelete = order }     // 触发删除弹窗
-                            )
-                        } else {
-                            OrderCard(
-                                order = order,
-                                isFormalTab = true,
-                                onConfirm = { },
-                                onComplete = { onCompleteOrder(order.id) },
-                                onChatClick = {
-                                    activeChatOrder = order
-                                    showChatSheet = true
-                                }
-                            )
-                        }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(currentDisplayList, key = { it.id }) { order ->
+                    if (selectedTabIndex == 0) {
+                        IntentOrderCard(
+                            order = order,
+                            onComplete = { orderToConfirm = it },
+                            onDelete = { orderToDelete = order }
+                        )
+                    } else {
+                        OrderCard(
+                            order = order,
+                            isFormalTab = true,
+                            onConfirm = {},
+                            onComplete = { onCompleteOrder(order.id) },
+                            onChatClick = {
+                                activeChatOrder = order
+                                showChatSheet = true
+                            }
+                        )
                     }
                 }
             }
         }
 
-        // --- 4. 确认对话框组件 (确保在 Box 作用域内) ---
-
-        // 转正确认
+        // 弹窗逻辑
         if (orderToConfirm != null) {
             AlertDialog(
                 onDismissRequest = { orderToConfirm = null },
                 title = { Text("确认转正") },
                 text = { Text("确定要将客户【${orderToConfirm!!.contactName}】的意向转为正式卷宗吗？") },
                 confirmButton = {
-                    Button(
-                        onClick = {
-                            val target = orderToConfirm!!
-                            orderToConfirm = null // 先关弹窗
-                            performConfirm(target) // 后执行逻辑
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-                    ) { Text("确认") }
+                    Button(onClick = {
+                        val target = orderToConfirm!!
+                        orderToConfirm = null
+                        performConfirm(target)
+                    }) { Text("确认") }
                 },
-                dismissButton = {
-                    TextButton(onClick = { orderToConfirm = null }) { Text("取消") }
-                }
+                dismissButton = { TextButton(onClick = { orderToConfirm = null }) { Text("取消") } }
             )
         }
 
-        // 删除确认
         if (orderToDelete != null) {
             AlertDialog(
                 onDismissRequest = { orderToDelete = null },
                 title = { Text("确认终止") },
-                text = { Text("此操作将永久销毁【${orderToDelete!!.contactName}】的意向卷宗，是否继续？") },
+                text = { Text("此操作将永久销毁该卷宗，是否继续？") },
                 confirmButton = {
-                    TextButton(
-                        onClick = {
-                            val target = orderToDelete!!
-                            orderToDelete = null
-                            performDelete(target)
-                        },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
-                    ) { Text("确认销毁") }
+                    TextButton(onClick = {
+                        val target = orderToDelete!!
+                        orderToDelete = null
+                        performDelete(target)
+                    }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) { Text("确认销毁") }
                 },
-                dismissButton = {
-                    TextButton(onClick = { orderToDelete = null }) { Text("取消") }
-                }
+                dismissButton = { TextButton(onClick = { orderToDelete = null }) { Text("取消") } }
             )
         }
 
-        // 详情表单 (底部弹窗)
         if (showChatSheet && activeChatOrder != null) {
-            ModalBottomSheet(
-                onDismissRequest = { showChatSheet = false },
-                sheetState = sheetState
-            ) {
+            ModalBottomSheet(onDismissRequest = { showChatSheet = false }) {
                 ChatBottomSheetContent(
                     order = activeChatOrder!!,
+                    managerId = managerId,
                     onDismiss = { showChatSheet = false },
                     onDataChanged = { onRefreshIntent(managerId) }
                 )
@@ -232,155 +187,33 @@ fun OrderCard(
     onComplete: () -> Unit,
     onChatClick: (Order) -> Unit
 ) {
-    // 统一处理状态判断（忽略大小写）
-    val isCompleted = order.status.equals("COMPLETED", ignoreCase = true)
+    val isCompleted = order.status.equals("Completed", ignoreCase = true) ||
+            order.status.equals("Delivered", ignoreCase = true)
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp, horizontal = 8.dp)
-            .alpha(if (isCompleted && !isFormalTab) 0.6f else 1.0f),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isFormalTab) Color(0xFFF0F7F0) else MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(if (isFormalTab) 2.dp else 4.dp),
-        shape = RoundedCornerShape(12.dp)
+        modifier = Modifier.fillMaxWidth().alpha(if (isCompleted) 0.8f else 1.0f),
+        colors = CardDefaults.cardColors(containerColor = if (isFormalTab) Color(0xFFF0F7F0) else Color.White),
+        elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // 头部信息
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text(
-                        text = if (isFormalTab) "正式卷宗: #${order.id}" else "采集意向: #${order.id}",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 16.sp,
-                        color = if (isFormalTab) Color(0xFF2E7D32) else Color.Unspecified
-                    )
-                    // 优化：显示真实姓名“斯嘉丽”，增加经办图标
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = Color.Gray
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = "负责人: ${order.managerName ?: "系统分配"}",
-                            fontSize = 11.sp,
-                            color = Color.Gray
-                        )
-                    }
-                }
-                Badge(
-                    containerColor = when {
-                        isFormalTab -> Color(0xFF2E7D32)
-                        else -> getStatusColor(order.status)
-                    }
-                ) {
-                    Text(
-                        text = if (isFormalTab) "已归档" else order.status,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontSize = 10.sp
-                    )
+                Text(text = "卷宗 #${order.id}", fontWeight = FontWeight.Bold)
+                Badge(containerColor = if (isCompleted) Color.Gray else Color(0xFF1976D2)) {
+                    Text(text = if (isCompleted) "已交付" else "研制中", color = Color.White)
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Text("客户: ${order.contactName}")
+            Text("明细: ${order.targetGiftName} x${order.targetQty}")
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 客户信息
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                    .padding(8.dp)
-            ) {
-                Text("客户: ${order.contactName}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Text("联系方式: ${order.contactMethod ?: order.userEmail}", fontSize = 12.sp, color = Color.DarkGray)
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 清单展示
-            Text("清单明细:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
-            if (order.details.orEmpty().isEmpty()) {
-                // 正式库展示逻辑
-                Column {
-                    Text("• ${order.targetGiftName ?: "未指定礼品"} x${order.targetQty}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    if (isFormalTab && !order.deliveryDate.isNullOrEmpty()) {
-                        Text(
-                            text = "📅 预定交付: ${order.deliveryDate}",
-                            fontSize = 12.sp,
-                            color = Color(0xFFE65100),
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                }
-            } else {
-                // 意向单展示逻辑
-                order.details.orEmpty().forEach { item ->
-                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-                        Text("• ${item.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        Text("x${item.qty}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            // 意向核对助手 (仅在意向阶段显示)
-            if (!isFormalTab) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Surface(
-                    onClick = { onChatClick(order) },
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(4.dp))
-                                Text("意向核对详情", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                            }
-                            Text(
-                                text = order.aiSuggestion ?: "点击完善采集信息...",
-                                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color.DarkGray
-                            )
-                        }
-                        Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
-                    }
-                }
-            }
-
-            // 操作按钮
-            if (!isCompleted || isFormalTab) {
-                // 注意：正式库即使状态是 Completed 也可以显示“完成交付”来做最终结单，或者不显示
-                val showButton = if (isFormalTab) order.status != "Delivered" else !isCompleted
-
-                if (showButton) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        if (!isFormalTab) {
-                            Button(
-                                onClick = onConfirm,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("生成正式卷宗")
-                            }
-                        } else if (order.status != "Delivered") {
-                            OutlinedButton(
-                                onClick = onComplete,
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, Color(0xFF2E7D32))
-                            ) {
-                                Text("完成最终交付", color = Color(0xFF2E7D32))
-                            }
-                        }
-                    }
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                OutlinedButton(onClick = { onChatClick(order) }) { Text("沟通") }
+                if (isFormalTab) {
+                    Button(
+                        onClick = onComplete,
+                        enabled = !isCompleted,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                    ) { Text(if (isCompleted) "已归档" else "交付") }
                 }
             }
         }
@@ -388,272 +221,69 @@ fun OrderCard(
 }
 
 @Composable
-fun IntentOrderCard(
-    order: Order,
-    onComplete: (Order) -> Unit,
-    onDelete: (Int) -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        elevation = CardDefaults.cardElevation(4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
-    ) {
+fun IntentOrderCard(order: Order, onComplete: (Order) -> Unit, onDelete: (Order) -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(2.dp)) {
         Column(Modifier.padding(16.dp)) {
-            // --- 头部：订单 ID 与 客户名 ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "意向卷宗 #${order.id}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.Gray
-                )
-                Surface(
-                    color = Color(0xFFFFF3E0),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = "客户: ${order.contactName}",
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontSize = 12.sp,
-                        color = Color(0xFFE65100),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // --- 核心内容：礼品详情 ---
-            Text(
-                text = order.targetGiftName ?: "未知礼品",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-
-            // 展示具体的商品规格/数量（解析自 details JSON）
-            order.details.forEach { item ->
-                Text(
-                    text = "• ${item.name} x ${item.qty} ${item.spec ?: ""}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.DarkGray,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-
-            // --- AI 客服功能块 (重新找回) ---
-            if (!order.aiSuggestion.isNullOrBlank()) {
-                Spacer(Modifier.height(12.dp))
-                Surface(
-                    color = Color(0xFFE3F2FD), // 淡蓝色背景
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text(
-                            text = "🤖 AI客服: ",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1976D2)
-                        )
-                        Text(
-                            text = order.aiSuggestion!!,
-                            fontSize = 12.sp,
-                            color = Color(0xFF0D47A1),
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
-            }
-
-            // --- 客户留言/联系方式 ---
-            if (!order.contactMethod.isNullOrBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "📞 联系方式: ${order.contactMethod}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
-            Spacer(Modifier.height(12.dp))
-
-            // --- 操作按键区 ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // 1. 终止按键
-                TextButton(
-                    onClick = { onDelete(order.id) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("终止意向")
-                }
-
-                Spacer(Modifier.width(12.dp))
-
-                // 2. 转正按键
-                Button(
-                    onClick = { onComplete(order) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("转为正式卷宗")
-                }
+            Text("意向卷宗 #${order.id}", color = Color.Gray)
+            Text(order.contactName, fontWeight = FontWeight.Bold)
+            Text(order.targetGiftName ?: "未指定礼品", fontSize = 14.sp)
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), Arrangement.End) {
+                TextButton(onClick = { onDelete(order) }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) { Text("终止") }
+                Button(onClick = { onComplete(order) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))) { Text("转为正式") }
             }
         }
     }
 }
 
-// ... 剩余代码（ChatBottomSheetContent 等）保持不变 ...
 @Composable
-fun ChatBottomSheetContent(
-    order: Order,
-    onDismiss: () -> Unit,
-    onDataChanged: () -> Unit
-) {
+fun ChatBottomSheetContent(order: Order, managerId: Int, onDismiss: () -> Unit, onDataChanged: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    val refItem = order.details.firstOrNull()
-    val refName = refItem?.name ?: ""
-    val refQty = refItem?.qty ?: 0
-
-    var giftName by remember {
-        mutableStateOf(if (order.targetGiftName == "待定" || order.targetGiftName.isNullOrEmpty()) refName else order.targetGiftName)
-    }
-    var qty by remember {
-        mutableStateOf(if (order.targetQty == 0) refQty.toString() else order.targetQty.toString())
-    }
-    var date by remember { mutableStateOf(order.deliveryDate ?: "待定") }
-    var contact by remember { mutableStateOf(order.contactMethod ?: "待定") }
-
-    var aiReminder by remember { mutableStateOf(order.aiSuggestion ?: "正在分析采集进度...") }
+    var giftName by remember { mutableStateOf(order.targetGiftName ?: "") }
+    var qty by remember { mutableStateOf(order.targetQty.toString()) }
+    var date by remember { mutableStateOf(order.deliveryDate ?: "") }
+    var contact by remember { mutableStateOf(order.contactMethod ?: "") }
     var isSaving by remember { mutableStateOf(false) }
-    var isAiLoading by remember { mutableStateOf(false) }
 
-    val isLocked = order.intentConfirmStatus == 1
-
-    LaunchedEffect(order.id) {
-        if (order.aiSuggestion == null || order.aiSuggestion == "待定") {
-            isAiLoading = true
-            try {
-                val response = RetrofitClient.adminService.getAiSuggestion(order.id)
-                if (response.success) aiReminder = response.data ?: ""
-            } finally {
-                isAiLoading = false
-            }
-        }
-    }
-
-    Column(modifier = Modifier
-        .padding(16.dp)
-        .padding(bottom = 32.dp)
-        .verticalScroll(rememberScrollState())
-    ) {
-        Text("意向卷宗采集", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("更新意向信息", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(16.dp))
-
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (isAiLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.TipsAndUpdates, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(text = aiReminder, fontSize = 13.sp, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.weight(1f))
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        IntentField("意向礼品名称", giftName, isLocked) { giftName = it }
-        IntentField("意向数量", qty, isLocked) { qty = it }
-        IntentField("期望交货时间", date, isLocked) { date = it }
-        IntentField("联系方式及时间", contact, isLocked) { contact = it }
-
-        Spacer(Modifier.height(24.dp))
+        IntentField("礼品名称", giftName, false) { giftName = it }
+        IntentField("数量", qty, false) { qty = it }
+        IntentField("日期", date, false) { date = it }
+        IntentField("联系方式", contact, false) { contact = it }
 
         Button(
             onClick = {
                 scope.launch {
                     isSaving = true
                     try {
-                        // ✨ 核心修正：将原始数据包装为 RequestBody
                         val textType = "text/plain".toMediaTypeOrNull()
-
-                        val orderIdPart = order.id.toString().toRequestBody(textType)
-                        val giftNamePart = giftName.toRequestBody(textType)
-                        val qtyPart = qty.toRequestBody(textType)
-                        val datePart = date.toRequestBody(textType)
-                        val contactPart = contact.toRequestBody(textType)
-                        val statusPart = "1".toRequestBody(textType)
-
-                        // 调用接口，注意：最后一个参数 formalImage 传 null
-                        // 因为在这个弹窗里我们只是锁定文字信息，不触发截图上传
                         val res = RetrofitClient.adminService.updateOrderIntent(
-                            orderId = orderIdPart,
-                            giftName = giftNamePart,
-                            qty = qtyPart,
-                            date = datePart,
-                            contact = contactPart,
-                            status = statusPart,
+                            orderId = order.id.toString().toRequestBody(textType),
+                            managerId = managerId.toString().toRequestBody(textType),
+                            managerName = "斯嘉丽".toRequestBody(textType),
+                            giftName = giftName.toRequestBody(textType),
+                            qty = qty.toRequestBody(textType),
+                            date = date.toRequestBody(textType),
+                            contact = contact.toRequestBody(textType),
+                            status = "1".toRequestBody(textType),
                             formalImage = null
                         )
-
                         if (res.success) {
-                            Toast.makeText(context, "意向单已生成并锁定", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "更新成功", Toast.LENGTH_SHORT).show()
                             onDataChanged()
                             onDismiss()
                         }
                     } catch (e: Exception) {
-                        android.util.Log.e("AuditFlow", "Save Error: ${e.message}")
-                        Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                    } finally {
-                        isSaving = false
-                    }
+                        Toast.makeText(context, "错误: ${e.message}", Toast.LENGTH_SHORT).show()
+                    } finally { isSaving = false }
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isLocked && !isSaving,
-            shape = RoundedCornerShape(8.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            modifier = Modifier.fillMaxWidth().padding(top = 24.dp)
         ) {
-            if (isSaving) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
-            } else {
-                Text(if (isLocked) "意向单已锁定（经理跟进中）" else "确认信息并生成意向单")
-            }
-        }
-
-        if (!isLocked) {
-            Text(
-                "注：锁定后信息将同步给经理，且不可在客户端修改。",
-                fontSize = 11.sp,
-                color = Color.Gray,
-                modifier = Modifier.padding(top = 8.dp).align(Alignment.CenterHorizontally)
-            )
+            if (isSaving) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+            else Text("确认并同步")
         }
     }
 }
@@ -664,15 +294,9 @@ fun IntentField(label: String, value: String, isLocked: Boolean, onValueChange: 
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         enabled = !isLocked,
-        singleLine = true,
-        colors = OutlinedTextFieldDefaults.colors(
-            disabledBorderColor = MaterialTheme.colorScheme.outlineVariant,
-            disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        singleLine = true
     )
 }
 
