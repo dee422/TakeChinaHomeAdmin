@@ -1,6 +1,7 @@
 package com.dee.android.pbl.takechinahome.admin.viewmodel
 
 import android.app.Application
+import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
@@ -13,12 +14,11 @@ import com.dee.android.pbl.takechinahome.admin.ui.util.ScrollGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import android.util.Log
+import java.io.File
 
 enum class FilterMode { ALL, PENDING, APPROVED, REJECTED }
 
@@ -34,7 +34,7 @@ data class AuditUiState(
 )
 
 class AuditViewModel(application: Application) : AndroidViewModel(application) {
-    // ✨ 保存当前的经理ID，防止刷新时丢失上下文
+    // 保存当前的经理ID，防止刷新时丢失上下文
     private var currentManagerId: Int = 0
 
     private val _uiState = mutableStateOf(AuditUiState())
@@ -44,11 +44,12 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
     private val scrollGenerator = ScrollGenerator(application)
 
     init {
-        // 初始化时暂时使用 ID 1 预加载，后期建议由 UI 层调用 refreshAll(id)
+        // 初始化时可默认刷新一次（ID 1 或从 Session 获取）
         refreshAll(1)
     }
 
-    // ✨ 核心修正：带参数的刷新，并更新成员变量
+    // --- 数据刷新与同步 ---
+
     fun refreshAll(managerId: Int) {
         this.currentManagerId = managerId
         fetchPendingItems()
@@ -84,10 +85,9 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.value = _uiState.value.copy(
                         intentOrders = response.data ?: emptyList()
                     )
-                    Log.d("AuditFlow", "意向订单刷新成功，数量: ${response.data?.size}")
                 }
             } catch (e: Exception) {
-                Log.e("AuditFlow", "失败: ${e.message}")
+                Log.e("AuditFlow", "获取意向单失败: ${e.message}")
             }
         }
     }
@@ -98,16 +98,17 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                 val response = RetrofitClient.adminService.getFormalOrders()
                 if (response.success) {
                     _uiState.value = _uiState.value.copy(formalOrders = response.data ?: emptyList())
-                    Log.d("AuditFlow", "✅ 正式订单抓取成功: ${response.data?.size}")
                 }
             } catch (e: Exception) {
-                Log.e("AuditFlow", "获取正式订单库失败", e)
+                Log.e("AuditFlow", "获取正式库失败", e)
             }
         }
     }
 
+    // --- 转正流程 (Intent -> Formal) ---
+
     fun approveAndConvertOrder(order: Order, managerEmail: String = "admin@ichessgeek.com") {
-        Log.d("AuditFlow", "1. 触发转正流程: OrderID=${order.id}")
+        Log.d("AuditFlow", "触发转正流程: OrderID=${order.id}")
         _uiState.value = _uiState.value.copy(isLoading = true, syncMessage = "正在生成正式卷宗...")
 
         viewModelScope.launch {
@@ -133,23 +134,24 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
 
                 val textType = "text/plain".toMediaTypeOrNull()
 
-                // 🚩 这里的 managerIdBody 使用了保存的 currentManagerId
                 val response = RetrofitClient.adminService.updateOrderIntent(
                     orderId = order.id.toString().toRequestBody(textType),
                     managerId = currentManagerId.toString().toRequestBody(textType),
                     managerName = "斯嘉丽".toRequestBody(textType),
-                    // 确保不要回传硬编码的 "正式卷宗"，除非真的没名字
-                    giftName = (order.targetGiftName ?: "未命名礼品").toRequestBody(textType),
+                    giftName = (order.targetGiftName ?: "").toRequestBody(textType),
                     qty = order.targetQty.toString().toRequestBody(textType),
-                    date = (order.deliveryDate ?: "无日期").toRequestBody(textType),
-                    contact = (order.contactMethod ?: "无联系方式").toRequestBody(textType),
-                    status = "1".toRequestBody(textType), // 状态 1 代表确认为正式
+                    date = (order.deliveryDate ?: "").toRequestBody(textType),
+                    contact = (order.contactMethod ?: "").toRequestBody(textType),
+                    status = "1".toRequestBody(textType),
                     formalImage = formalImagePart
                 )
 
-                Log.d("AuditFlow", "上传响应: ${response.success}, 消息: ${response.message}")
-
                 if (response.success) {
+                    // 🚩 锁定成功后，务必立刻刷新意向订单列表，UI 才会显示“已锁定”
+                    withContext(Dispatchers.Main) {
+                        fetchIntentOrders(currentManagerId)
+                    }
+                    // 然后再进行物理搬家
                     finalizeTransaction(order, file.absolutePath, managerEmail)
                 } else {
                     withContext(Dispatchers.Main) {
@@ -157,7 +159,6 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
-                Log.e("AuditFlow", "handleGeneratedScroll 崩溃", e)
                 withContext(Dispatchers.Main) {
                     _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "网络异常")
                 }
@@ -177,7 +178,6 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) {
                     if (response.success) {
                         _uiState.value = _uiState.value.copy(isLoading = false, syncMessage = "转正完成")
-                        // ✨ 修正：传入保存好的 currentManagerId 刷新列表
                         refreshAll(currentManagerId)
                     } else {
                         _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = "收尾失败")
@@ -190,6 +190,47 @@ class AuditViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    // --- ✨ 新增：正式订单终态管理 (Completed / Terminated) ---
+
+    fun updateFormalOrderStatus(orderId: Int, newStatus: String, managerId: Int) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            try {
+                // 这里调用 updateOrderIntent 接口，利用 status 字段更新
+                // 在后端逻辑中，status='Completed' 或 'Terminated' 会触发不同的结果
+                val textType = "text/plain".toMediaTypeOrNull()
+
+                // 这里的逻辑是：既然是更新正式订单，我们只需要传 ID 和新的 Status
+                // 其他字段可以根据后端需求保持可选或传原值
+                val res = RetrofitClient.adminService.updateOrderIntent(
+                    orderId = orderId.toString().toRequestBody(textType),
+                    managerId = managerId.toString().toRequestBody(textType),
+                    managerName = "".toRequestBody(textType),
+                    giftName = "".toRequestBody(textType), // 后端应处理空值不更新
+                    qty = "".toRequestBody(textType),
+                    date = "".toRequestBody(textType),
+                    contact = "".toRequestBody(textType),
+                    status = newStatus.toRequestBody(textType), // ✨ 核心：传入 "Completed" 或 "Terminated"
+                    formalImage = null
+                )
+
+                if (res.success) {
+                    //Log.d("AuditFlow", "订单 #$orderId 状态已更新为: $newStatus")
+                    refreshAll(managerId)
+                } else {
+                    _uiState.value = _uiState.value.copy(errorMessage = "更新失败: ${res.message}")
+                }
+            } catch (e: Exception) {
+                //Log.e("AuditFlow", "更新正式订单异常", e)
+                _uiState.value = _uiState.value.copy(errorMessage = "网络连接异常")
+            } finally {
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            }
+        }
+    }
+
+    // --- 物件审核逻辑 ---
 
     fun setFilterMode(mode: FilterMode) {
         _uiState.value = _uiState.value.copy(

@@ -8,12 +8,14 @@
         .content { margin-top: 20px; line-height: 1.6; }
         .field { margin-bottom: 10px; }
         .label { font-weight: bold; color: #666; }
+        /* ✨ 增加一个编号样式，使其更显眼 */
+        .order-no { color: #2E7D32; font-weight: bold; }
     </style>
 </head>
 <body>
 <div class="header">
     <h1>雅鉴·正式卷宗</h1>
-    <p>订单编号：<span id="orderId">--</span></p>
+    <p>关联意向单号：<span id="orderId" class="order-no">--</span></p>
 </div>
 <div class="content">
     <div class="field"><span class="label">意向礼品：</span><span id="giftName">--</span></div>
@@ -24,17 +26,16 @@
 </div>
 
 <script>
-    // ✨ 确保函数定义完全正确，不要在参数或逻辑里加多余的符号
     function setData(orderId, gift, qty, date, contact, manager) {
         try {
-            document.getElementById('orderId').innerText = orderId;
+            // ✨ 这里你可以选择传入原始 ID 并在前面加标识
+            document.getElementById('orderId').innerText = "#" + orderId;
             document.getElementById('giftName').innerText = gift;
             document.getElementById('qty').innerText = qty;
             document.getElementById('date').innerText = date;
             document.getElementById('contact').innerText = contact;
             document.getElementById('manager').innerText = manager;
 
-            // 通知 Android 渲染完成了（如果你的 ScrollGenerator 监听了 console）
             console.log("RENDER_COMPLETE");
         } catch (e) {
             console.error("JS_ERROR: " + e.message);

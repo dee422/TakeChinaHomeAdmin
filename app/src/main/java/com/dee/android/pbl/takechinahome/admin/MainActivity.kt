@@ -234,7 +234,11 @@ fun AdminMainContainer() {
 
                             // 🚀 交付逻辑
                             onCompleteOrder = { id ->
-                                // auditViewModel.completeOrder(id)
+                                auditViewModel.updateFormalOrderStatus(id, "Completed", currentManagerId)
+                            },
+                            // ✨ 新增这行适配
+                            onTerminateOrder = { id ->
+                                auditViewModel.updateFormalOrderStatus(id, "Terminated", currentManagerId)
                             }
                         )
                     }
