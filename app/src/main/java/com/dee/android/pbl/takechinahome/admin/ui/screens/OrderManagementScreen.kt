@@ -39,79 +39,98 @@ fun OrderManagementScreen(
     onConfirmIntent: (Order) -> Unit,
     onCompleteOrder: (Int) -> Unit
 ) {
-    // 获取 Context 用于 Toast
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
 
+    // --- 状态变量 (严禁改名) ---
     var showChatSheet by remember { mutableStateOf(false) }
     var activeChatOrder by remember { mutableStateOf<Order?>(null) }
-    var orderToDelete by remember { mutableStateOf<Int?>(null) }
-    var selectedTabIndex by remember { mutableStateOf(0) }
+    var orderToDelete by remember { mutableStateOf<Order?>(null) } // 改为存储 Order 对象，方便取 ID 和名字
+    var orderToConfirm by remember { mutableStateOf<Order?>(null) }
+    var isSynchronizing by remember { mutableStateOf(false) }
 
+    var selectedTabIndex by remember { mutableStateOf(0) }
     val tabs = listOf("待处理意向", "正式订单库")
 
-    // 1. 删除逻辑封装 (修正变量名与上下文)
-    val performDelete = { id: Int ->
+    // --- 逻辑函数 ---
+
+    // 删除执行
+    val performDelete = { order: Order ->
         scope.launch {
             try {
-                // 使用正确的参数名 managerId
-                val res = RetrofitClient.adminService.deleteOrderManager(id, managerId)
+                val res = RetrofitClient.adminService.deleteOrderManager(order.id, managerId)
                 if (res.success) {
                     Toast.makeText(context, "卷宗已销毁", Toast.LENGTH_SHORT).show()
-                    // 使用正确的刷新回调
                     onRefreshIntent(managerId)
                 } else {
                     Toast.makeText(context, "错误: ${res.message}", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(context, "网络异常: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "网络异常", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    // Tab 切换触发刷新
-    LaunchedEffect(selectedTabIndex, managerId) {
-        if (selectedTabIndex == 0) {
-            onRefreshIntent(managerId)
-        } else {
-            onRefreshFormal()
+    // 转正执行
+    val performConfirm = { order: Order ->
+        scope.launch {
+            try {
+                isSynchronizing = true
+                onConfirmIntent(order) // 调用 ViewModel 的 approveAndConvertOrder
+
+                // 给后端一点处理时间，然后强制刷新双表
+                kotlinx.coroutines.delay(1200)
+                onRefreshIntent(managerId)
+                onRefreshFormal()
+
+                isSynchronizing = false
+                Toast.makeText(context, "转正指令已执行", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                isSynchronizing = false
+                Toast.makeText(context, "同步异常", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("卷宗管理 (订单)", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
-            // Tab 切换头
+    // 布局根容器
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+
+            // 1. 同步提示条 (位于 TabRow 上方)
+            if (isSynchronizing) {
+                Surface(
+                    color = Color(0xFFFFF3E0),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFFE65100))
+                        Spacer(Modifier.width(12.dp))
+                        Text("正在同步数据，请耐心等待...", fontSize = 12.sp, color = Color(0xFFE65100))
+                    }
+                }
+            }
+
+            // 2. Tab 切换
             TabRow(selectedTabIndex = selectedTabIndex) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
-                        text = {
-                            Text(title, fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Normal)
-                        }
+                        text = { Text(title, fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Normal) }
                     )
                 }
             }
 
+            // 3. 列表内容
             val currentDisplayList = if (selectedTabIndex == 0) intentOrders else formalOrders
 
             if (currentDisplayList.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.TaskAlt, null, modifier = Modifier.size(48.dp), tint = Color.LightGray)
-                        Spacer(Modifier.height(8.dp))
-                        Text("暂无相关卷宗", color = Color.Gray)
-                    }
+                    Text("暂无相关卷宗", color = Color.Gray)
                 }
             } else {
                 LazyColumn(
@@ -120,22 +139,22 @@ fun OrderManagementScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(currentDisplayList, key = { it.id }) { order ->
-                        // 根据 Tab 决定渲染哪种卡片
                         if (selectedTabIndex == 0) {
-                            // 意向单 Tab 使用带删除功能的 IntentOrderCard
                             IntentOrderCard(
                                 order = order,
-                                onComplete = { onConfirmIntent(it) }, // 跳转生成正式单
-                                onDelete = { orderToDelete = it }
+                                onComplete = { orderToConfirm = it }, // 触发确认弹窗
+                                onDelete = { orderToDelete = order }     // 触发删除弹窗
                             )
                         } else {
-                            // 正式单 Tab 使用普通 OrderCard
                             OrderCard(
                                 order = order,
                                 isFormalTab = true,
                                 onConfirm = { },
                                 onComplete = { onCompleteOrder(order.id) },
-                                onChatClick = { /* 正式单通常不进入采集模式 */ }
+                                onChatClick = {
+                                    activeChatOrder = order
+                                    showChatSheet = true
+                                }
                             )
                         }
                     }
@@ -143,19 +162,42 @@ fun OrderManagementScreen(
             }
         }
 
-        // --- 对话框组件 ---
+        // --- 4. 确认对话框组件 (确保在 Box 作用域内) ---
 
-        // 1. 确认删除对话框
+        // 转正确认
+        if (orderToConfirm != null) {
+            AlertDialog(
+                onDismissRequest = { orderToConfirm = null },
+                title = { Text("确认转正") },
+                text = { Text("确定要将客户【${orderToConfirm!!.contactName}】的意向转为正式卷宗吗？") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val target = orderToConfirm!!
+                            orderToConfirm = null // 先关弹窗
+                            performConfirm(target) // 后执行逻辑
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                    ) { Text("确认") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { orderToConfirm = null }) { Text("取消") }
+                }
+            )
+        }
+
+        // 删除确认
         if (orderToDelete != null) {
             AlertDialog(
                 onDismissRequest = { orderToDelete = null },
                 title = { Text("确认终止") },
-                text = { Text("此操作将永久销毁该意向卷宗，是否继续？") },
+                text = { Text("此操作将永久销毁【${orderToDelete!!.contactName}】的意向卷宗，是否继续？") },
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            performDelete(orderToDelete!!)
+                            val target = orderToDelete!!
                             orderToDelete = null
+                            performDelete(target)
                         },
                         colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
                     ) { Text("确认销毁") }
@@ -166,12 +208,11 @@ fun OrderManagementScreen(
             )
         }
 
-        // 2. 意向核对详情 底部弹窗
+        // 详情表单 (底部弹窗)
         if (showChatSheet && activeChatOrder != null) {
             ModalBottomSheet(
                 onDismissRequest = { showChatSheet = false },
-                sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surface
+                sheetState = sheetState
             ) {
                 ChatBottomSheetContent(
                     order = activeChatOrder!!,

@@ -167,6 +167,7 @@ fun AdminMainContainer() {
                                 "订单管理" -> {
                                     auditViewModel.fetchIntentOrders(currentManagerId)
                                     auditViewModel.fetchFormalOrders()
+                                    Toast.makeText(context, "正在同步云端卷宗...", Toast.LENGTH_SHORT).show()
                                 }
                                 else -> Toast.makeText(context, "$currentScreen 暂不支持刷新", Toast.LENGTH_SHORT).show()
                             }
